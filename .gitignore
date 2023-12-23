@@ -47,3 +47,4 @@ WakaTime.sublime-settings
 
 #### Python ####
 __pycache__
+.env
