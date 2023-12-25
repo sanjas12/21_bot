@@ -5,6 +5,7 @@
 .code-workspace
 
 #### Python ####
+build*
 __pycache__
 .venv*
 *.pyc
