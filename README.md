@@ -1,4 +1,4 @@
-# 21_bot
+# 21_bot (https://t.me/sanjas12_bot)
 
 # Contents
 
@@ -6,8 +6,9 @@
 
 ### Prerequisites
 
-### Usage
-1. source .env  -> After that, run the source .env command to read the environment variables from the .env file. 
+### Usage (Windows)
+1. source .env
+2. python main.py
 
 ### TODO
 
