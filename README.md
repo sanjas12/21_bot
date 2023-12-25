@@ -5,9 +5,14 @@
 ## Installation
 
 ### Prerequisites
+1. pip install -r requirement.txt
 
 ### Usage (Windows)
 1. source start.bat
+
+### Usage (Ubuntu)
+1. sh start.sh
+
 
 ### TODO
 
