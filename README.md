@@ -7,8 +7,7 @@
 ### Prerequisites
 
 ### Usage (Windows)
-1. source .env
-2. python main.py
+1. source start.bat
 
 ### TODO
 
