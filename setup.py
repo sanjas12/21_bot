@@ -1,4 +1,4 @@
-#0.0.0.0
+#0.0.0.1
 from cx_Freeze import setup, Executable
 
 file = "setup.py"
