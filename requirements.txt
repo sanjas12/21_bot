@@ -1,0 +1,14 @@
+cabarchive==0.2.5
+certifi==2023.7.22
+charset-normalizer==2.0.12
+cx_Freeze==8.6.4
+filelock==3.28.0
+freeze-core==0.6.1
+idna==3.4
+lief==0.17.6
+packaging==26.1
+pyTelegramBotAPI==4.13.0
+python-dotenv==1.0.0
+requests==2.27.1
+striprtf==0.0.29
+urllib3==1.26.16
