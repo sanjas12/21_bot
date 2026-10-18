@@ -8,7 +8,17 @@
 1. Install Python 3.11+ and uv.
 2. Run `uv sync --locked` from the project root on Windows for development.
 3. On Ubuntu, run `uv sync --locked --no-dev`.
-4. Set `BOT_TOKEN` in a local `.env` file in the project root.
+4. Copy `.env.example` to `.env` in the project root and set `BOT_TOKEN` there.
+
+### Token storage
+
+Keep the real token only in the local `.env` file. Git ignores `.env` and
+`.env.*`, except for `.env.example`, which contains no secrets.
+Create a separate `.env` on the Ubuntu server; do not transfer it through Git.
+On Ubuntu, restrict access with `chmod 600 .env`.
+If a real token has been committed or published, revoke it through BotFather
+and put the replacement token in the local `.env`. Removing the file from
+Git tracking does not remove it from old commits.
 
 Bot sources are in `src/`; the entry point is `src/main.py`.
 
