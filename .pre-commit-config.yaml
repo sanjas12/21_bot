@@ -1,0 +1,66 @@
+repos:
+  # --- Базовые проверки файлов ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace        # удаляет пробелы в конце строк
+      - id: end-of-file-fixer          # добавляет перевод строки в конце файла
+      - id: check-yaml                 # валидирует YAML
+      - id: check-toml                 # валидирует TOML
+      - id: check-json                 # валидирует JSON
+      - id: check-merge-conflict       # находит маркеры конфликтов git
+      - id: check-added-large-files    # блокирует файлы > 500KB
+        args: ["--maxkb=500"]
+      - id: check-case-conflict        # проверяет конфликты имён файлов
+      - id: debug-statements           # находит оставленные breakpoint(), pdb и т.д.
+      - id: detect-private-key         # предотвращает коммит приватных ключей
+      - id: mixed-line-ending          # нормализует окончания строк
+        args: ["--fix=lf"]
+        exclude: ^(docs/CHANGELOG\.md|src/_version\.py)$
+
+  # --- Форматирование Python (Ruff) ---
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.12
+    hooks:
+      - id: ruff                       # линтер (заменяет flake8, isort, pyupgrade)
+        args: ["--fix", "--exit-non-zero-on-fix"]
+      - id: ruff-format                # форматтер (заменяет black)
+
+  # --- Проверка типов ---
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-PyYAML
+        args: ["--ignore-missing-imports"]
+        # Проверяем только src, не трогаем тесты и конфиги
+        files: ^src/
+
+  # --- Безопасность ---
+  # - repo: https://github.com/Yelp/detect-secrets
+  #   rev: v1.5.0
+  #   hooks:
+  #     - id: detect-secrets             # ищет случайно закоммиченные секреты
+  #       args: ["--baseline", ".secrets.baseline"]
+
+  # --- Качество коммитов ---
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit   # проверяет формат сообщений коммитов
+        stages: [commit-msg]
+        args: [feat, fix, docs, style, refactor, test, chore, ci, perf, bump, build]
+
+# --- Глобальные настройки ---
+default_language_version:
+  python: python3.8
+
+# Исключаем автогенерированные файлы и папку сборки
+exclude: |
+  (?x)^(
+    build/.*|
+    \.venv/.*|
+    __pycache__/.*|
+    .*\.pyc
+  )$
