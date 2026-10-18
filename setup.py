@@ -33,6 +33,6 @@ setup(
     description="My Telegram Bot",
     options={"build_exe": build_exe_options},
     
-    executables=[Executable("main.py", target_name="mybot")],
+    executables=[Executable("src/main.py", target_name="mybot")],
     
 )

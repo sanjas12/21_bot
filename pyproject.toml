@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.uv]
-# Run main.py directly; do not build/install the legacy setup.py project.
+# Run src/main.py directly; do not build/install the legacy setup.py project.
 package = false
 environments = [
     "sys_platform == 'win32'",
@@ -36,6 +36,7 @@ environments = [
 
 # ─── Ruff: линтер + форматер ─────────────────────────────────────────────────
 [tool.ruff]
+src = ["src"]
 line-length = 88
 target-version = "py311"
 extend-exclude = ["build", "dist", ".uv-cache"]
