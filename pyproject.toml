@@ -1,0 +1,57 @@
+[project]
+name = "sanja_bot"
+version = "0.0.1"
+description = "Telegram bot for running on Ubuntu and developing on Windows"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "sanja_s", email = "sanja100v@gmail.com"}
+]
+
+dependencies = [
+    "pyTelegramBotAPI==4.13.0",
+    "python-dotenv==1.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/sanjas12/21_bot.git"
+
+[dependency-groups]
+# Optional tools for building a Windows executable; not needed on Ubuntu.
+build = [
+    "cx-Freeze==8.6.4 ; sys_platform == 'win32'",
+]
+dev = [
+    "pre-commit>=4,<5",
+    "ruff>=0.11,<1",
+]
+
+[tool.uv]
+# Run main.py directly; do not build/install the legacy setup.py project.
+package = false
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+]
+
+# ─── Ruff: линтер + форматер ─────────────────────────────────────────────────
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+extend-exclude = ["build", "dist", ".uv-cache"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "N",
+    "SIM",
+]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
