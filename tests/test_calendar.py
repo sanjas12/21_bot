@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from date_picker import picker  # noqa: E402
 from main import MENU, MyBot  # noqa: E402
 from notebook import Store, due_reminders, occurrences  # noqa: E402
 
@@ -102,6 +103,61 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0]["repeat"], "monthly")
         self.assertEqual(saved[0]["reminder"], 60)
+
+    def click_date(self, action, value="", uid=1, token=None):
+        token = token or self.app.drafts[uid]["picker_token"]
+        message = self.message("", uid)
+        message.message_id = 42
+        self.app.callback(
+            SimpleNamespace(
+                id="callback",
+                message=message,
+                from_user=message.from_user,
+                data=f"date:{token}:{action}:{value}",
+            )
+        )
+
+    def test_interactive_date_full_flow(self):
+        for text in (MENU[0], "Событие из календаря"):
+            self.app.handle(self.message(text))
+        self.click_date("month", "2030-02-01")
+        self.click_date("day", "2030-02-28")
+        self.click_date("hour", "14")
+        self.click_date("minute", "35")
+        self.assertEqual(self.app.drafts[1]["step"], "repeat")
+        self.app.handle(self.message("Однократно"))
+        self.app.handle(self.message("За час"))
+        self.assertEqual(self.store.events(1)[0]["starts"], "2030-02-28T14:35:00")
+
+    def test_old_calendar_cannot_change_new_draft(self):
+        for text in (MENU[0], "Первое"):
+            self.app.handle(self.message(text))
+        old_token = self.app.drafts[1]["picker_token"]
+        for text in ("/cancel", MENU[0], "Второе"):
+            self.app.handle(self.message(text))
+        self.click_date("day", "2030-02-28", token=old_token)
+        self.assertEqual(self.app.drafts[1]["picker_stage"], "day")
+        self.assertNotIn("day", self.app.drafts[1])
+
+    def test_calendar_back_and_cancel(self):
+        for text in (MENU[0], "Отменить"):
+            self.app.handle(self.message(text))
+        self.click_date("day", "2030-02-28")
+        self.click_date("hour", "10")
+        self.click_date("back", "hour")
+        self.assertEqual(self.app.drafts[1]["picker_stage"], "hour")
+        self.click_date("back", "day")
+        self.click_date("cancel")
+        self.assertNotIn(1, self.app.drafts)
+        self.assertEqual(self.store.events(1), [])
+
+    def test_calendar_leap_year_and_past_days(self):
+        today = utc("2028-02-15").date()
+        _, markup = picker("day", "token", today)
+        values = [button.callback_data for row in markup.keyboard for button in row]
+        self.assertIn("date:token:day:2028-02-29", values)
+        self.assertNotIn("date:token:day:2028-02-14", values)
+        self.assertTrue(all(len(value.encode()) <= 64 for value in values))
 
     def test_invalid_date_and_cancel(self):
         for text in [MENU[0], "Встреча", "31.02.2030 10:00"]:

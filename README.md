@@ -40,7 +40,9 @@ uv run --locked --no-dev --env-file .env python src/main.py
 
 Open the bot in a private Telegram chat and send `/start`.
 
-- **Добавить событие**: enter a title, a future date (`25.12.2026 10:00`),
+- **Добавить событие**: enter a title, select a day in the inline calendar,
+  then an hour and minutes (5-minute steps). Navigate months or use Today/Tomorrow.
+  Alternatively, type an exact future date (`25.12.2026 10:00`),
   a recurrence and a reminder interval. `/cancel` cancels unfinished input.
 - Recurrence: once, daily, weekly, monthly or yearly. A monthly event on the
   31st uses the last day of a shorter month, then returns to the 31st.

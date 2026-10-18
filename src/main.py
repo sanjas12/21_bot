@@ -12,6 +12,7 @@ import telebot
 from dotenv import load_dotenv
 from telebot import types
 
+from date_picker import picker
 from notebook import REPEATS, Store, add_months, due_reminders, occurrences
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -167,10 +168,80 @@ class MyBot:
     def ask_date(self, uid, draft):
         self.say(
             uid,
-            "Дата и время: ДД.ММ.ГГГГ ЧЧ:ММ\n"
-            f"Например: 25.12.2026 10:00. Пояс: {draft['timezone']}.",
+            "Выберите дату и время кнопками ниже или введите вручную:\n"
+            f"25.12.2026 10:00. Пояс: {draft['timezone']}.",
             ["Отмена"],
         )
+        self.show_picker(uid)
+
+    def show_picker(self, uid, stage="day", month=None, message_id=None):
+        draft = self.drafts[uid]
+        token = uuid4().hex[:10]
+        draft.update(picker_token=token, picker_stage=stage)
+        today = datetime.now(ZoneInfo(draft["timezone"])).date()
+        text, markup = picker(
+            stage,
+            token,
+            today,
+            month=month,
+            day=draft.get("day"),
+            hour=draft.get("hour"),
+        )
+        text += (
+            f"\nЧасовой пояс: {draft['timezone']}. Можно ввести дату и время текстом."
+        )
+        if message_id is None:
+            self.bot.send_message(uid, text, reply_markup=markup)
+        else:
+            self.bot.edit_message_text(text, uid, message_id, reply_markup=markup)
+
+    def pick_date(self, uid, parts, message_id):
+        draft = self.drafts.get(uid)
+        if (
+            not draft
+            or draft.get("step") != "date"
+            or draft.get("picker_token") != parts[1]
+        ):
+            self.say(
+                uid,
+                "Этот календарь устарел. Продолжите текущий ввод или добавьте событие заново.",
+            )
+            return
+        action, value = parts[2:]
+        stage = draft["picker_stage"]
+        today = datetime.now(ZoneInfo(draft["timezone"])).date()
+        try:
+            if action == "ignore":
+                return
+            if action == "cancel":
+                self.drafts.pop(uid)
+                self.bot.edit_message_reply_markup(uid, message_id, reply_markup=None)
+                self.say(uid, "Добавление отменено.")
+            elif action == "month" and stage == "day":
+                month = datetime.strptime(value, "%Y-%m-%d").date().replace(day=1)
+                if today.replace(day=1) <= month and month.year <= 2099:
+                    self.show_picker(uid, month=month, message_id=message_id)
+            elif action == "day" and stage == "day":
+                day = datetime.strptime(value, "%Y-%m-%d").date()
+                if today <= day and day.year <= 2099:
+                    draft["day"] = day
+                    self.show_picker(uid, "hour", message_id=message_id)
+            elif action == "hour" and stage == "hour" and 0 <= int(value) <= 23:
+                draft["hour"] = int(value)
+                self.show_picker(uid, "minute", message_id=message_id)
+            elif action == "minute" and stage == "minute" and 0 <= int(value) <= 59:
+                text = f"{draft['day']:%d.%m.%Y} {draft['hour']:02d}:{int(value):02d}"
+                self.advance(uid, text)
+                if draft["step"] == "repeat":
+                    self.bot.edit_message_text(
+                        f"Выбрано: {text} ({draft['timezone']})", uid, message_id
+                    )
+                else:
+                    self.show_picker(uid, "hour", message_id=message_id)
+            elif action == "back" and value in ("day", "hour"):
+                self.show_picker(uid, value, message_id=message_id)
+        except (ValueError, OverflowError):
+            self.say(uid, "Не удалось выбрать дату. Попробуйте ещё раз.", ["Отмена"])
 
     def show_events(self, uid, period):
         zone = ZoneInfo(self.store.timezone(uid))
@@ -262,7 +333,9 @@ class MyBot:
             return
         uid = call.from_user.id
         parts = (call.data or "").split(":")
-        if len(parts) == 3 and parts[0] == "page" and parts[2].isdigit():
+        if len(parts) == 4 and parts[0] == "date":
+            self.pick_date(uid, parts, call.message.message_id)
+        elif len(parts) == 3 and parts[0] == "page" and parts[2].isdigit():
             self.render_page(uid, parts[1], int(parts[2]))
         elif len(parts) == 2 and parts[0] == "delete" and parts[1].isdigit():
             deleted = self.store.delete(uid, int(parts[1]))
