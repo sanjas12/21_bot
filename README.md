@@ -40,6 +40,15 @@ uv run --locked --no-dev --env-file .env python src/main.py
 
 Open the bot in a private Telegram chat and send `/start`.
 
+New events default to **Общее**: all users known to the bot can see them and
+receive their reminders. The final creation step offers **Общее (по умолчанию)**
+or **Личное** before saving. Personal events are visible only to their author.
+Only the author can edit or delete an event, including a shared one. The
+**Доступ** field in editing changes visibility. Existing records remain personal
+when upgrading; they are never published automatically. Reminder delivery is
+tracked separately for each recipient, so one failed delivery does not block
+the others. New users see existing shared events on their next calendar view.
+
 - **Добавить событие**: enter a title, select a day in the inline calendar,
   then an hour and minutes (5-minute steps). Navigate months or use Today/Tomorrow.
   Alternatively, type an exact future date (`25.12.2026 10:00`),
@@ -76,7 +85,8 @@ cause a duplicate notification.
 Events and time zones persist in `data/calendar.sqlite3` (excluded from Git).
 For a simple backup, stop the bot and copy the whole `data/` directory.
 Unfinished input and open list pages are reset on restart. Records are isolated
-by Telegram user; group chats are not used for personal events.
+by Telegram user for personal events; shared events are visible to everyone.
+Group chats are not used for calendar management.
 
 Offline checks, without contacting Telegram:
 

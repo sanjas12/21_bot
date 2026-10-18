@@ -22,6 +22,7 @@ def event(starts="2030-01-31T10:00:00", repeat="monthly", timezone="Europe/Mosco
         "starts": starts,
         "repeat": repeat,
         "timezone": timezone,
+        "visibility": "private",
     }
 
 
@@ -97,7 +98,14 @@ class CalendarTests(unittest.TestCase):
         )
 
     def test_creation_and_persistence(self):
-        for text in [MENU[0], "Встреча", "31.01.2030 10:00", "Ежемесячно", "За час"]:
+        for text in [
+            MENU[0],
+            "Встреча",
+            "31.01.2030 10:00",
+            "Ежемесячно",
+            "За час",
+            "Общее (по умолчанию)",
+        ]:
             self.app.handle(self.message(text))
         saved = Store(self.path).events(1)
         self.assertEqual(len(saved), 1)
@@ -200,6 +208,7 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(self.app.drafts[1]["step"], "repeat")
         self.app.handle(self.message("Однократно"))
         self.app.handle(self.message("За час"))
+        self.app.handle(self.message("Общее (по умолчанию)"))
         self.assertEqual(self.store.events(1)[0]["starts"], "2030-02-28T14:35:00")
 
     def test_old_calendar_cannot_change_new_draft(self):
@@ -239,6 +248,87 @@ class CalendarTests(unittest.TestCase):
         self.app.handle(self.message("/cancel"))
         self.assertNotIn(1, self.app.drafts)
         self.assertEqual(self.store.events(1), [])
+
+    def test_creation_defaults_to_public_and_private_can_be_selected(self):
+        for text in (MENU[0], "Общее", "31.01.2030 10:00", "Однократно", "За час"):
+            self.app.handle(self.message(text))
+        self.assertEqual(self.app.drafts[1]["visibility"], "public")
+        self.assertEqual(self.app.drafts[1]["step"], "visibility")
+        self.app.handle(self.message("Общее (по умолчанию)"))
+        public = self.store.events(1)[0]
+        self.assertEqual(public["visibility"], "public")
+        for text in (
+            MENU[0],
+            "Личная запись",
+            "31.01.2030 10:00",
+            "Однократно",
+            "За час",
+            "Личное",
+        ):
+            self.app.handle(self.message(text))
+        self.assertEqual(len(self.store.events(1)), 2)
+        self.assertEqual(
+            [row["id"] for row in self.store.visible_events(2)], [public["id"]]
+        )
+
+    def test_shared_visibility_does_not_grant_edit_or_delete(self):
+        eid = self.store.add(1, {**event(), "visibility": "public"}, 60)
+        self.assertEqual(self.store.visible_events(2)[0]["id"], eid)
+        self.assertIsNone(self.store.get(2, eid))
+        self.assertFalse(self.store.delete(2, eid))
+        self.app.begin_edit(2, eid)
+        self.assertNotIn(2, self.app.drafts)
+
+    def test_shared_reminders_track_each_recipient(self):
+        self.store.ensure_user(2)
+        eid = self.store.add(
+            1, {**event("2030-01-01T10:00:00", "once"), "visibility": "public"}, 60
+        )
+        now = utc("2030-01-01T06:00:00")
+        self.app.remind_once(now)
+        self.assertEqual(
+            {call.args[0] for call in self.api.send_message.call_args_list}, {1, 2}
+        )
+        self.assertTrue(self.store.sent(eid, utc("2030-01-01T07:00:00"), 2))
+        self.api.send_message.reset_mock()
+        self.app.remind_once(now)
+        self.api.send_message.assert_not_called()
+
+    def test_failed_shared_delivery_does_not_block_other_users(self):
+        self.store.ensure_user(2)
+        self.store.add(
+            1, {**event("2030-01-01T10:00:00", "once"), "visibility": "public"}, 60
+        )
+        now = utc("2030-01-01T06:00:00")
+        self.api.send_message.side_effect = lambda uid, *a, **kw: (
+            (_ for _ in ()).throw(OSError()) if uid == 1 else None
+        )
+        with self.assertLogs("main", level="ERROR"):
+            self.app.remind_once(now)
+        self.api.send_message.reset_mock()
+        self.api.send_message.side_effect = None
+        self.app.remind_once(now)
+        self.assertEqual(
+            [call.args[0] for call in self.api.send_message.call_args_list], [1]
+        )
+
+    def test_changing_shared_event_to_private(self):
+        eid = self.store.add(1, {**event(), "visibility": "public"}, 60)
+        for text in (f"/edit {eid}", "Доступ", "Личное", "Сохранить изменения"):
+            self.app.handle(self.message(text))
+        self.assertEqual(self.store.visible_events(2), [])
+        self.assertEqual(self.store.recipients(self.store.get(1, eid)), [1])
+
+    def test_legacy_events_remain_private_and_delivery_is_preserved(self):
+        eid = self.store.add(1, event(), 60)
+        start = utc("2030-01-31T07:00:00")
+        with self.store.connect() as db:
+            db.execute("ALTER TABLE events DROP COLUMN visibility")
+            db.execute("INSERT INTO reminders VALUES (?,?)", (eid, start.isoformat()))
+        reopened = Store(self.path)
+        self.assertEqual(reopened.get(1, eid)["visibility"], "private")
+        self.assertEqual(reopened.visible_events(2), [])
+        self.assertTrue(reopened.sent(eid, start, 1))
 
     def test_ownership_and_delete_confirmation(self):
         eid = self.store.add(1, event(), 60)

@@ -83,6 +83,20 @@ class Store:
                 db.execute(
                     "ALTER TABLE events ADD COLUMN created_at TEXT NOT NULL DEFAULT ''"
                 )
+            if "visibility" not in columns:
+                db.execute(
+                    "ALTER TABLE events ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'"
+                )
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS deliveries (
+                    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                    user_id INTEGER NOT NULL REFERENCES users(id), occurrence TEXT NOT NULL,
+                    PRIMARY KEY(event_id,user_id,occurrence));
+                INSERT OR IGNORE INTO deliveries(event_id,user_id,occurrence)
+                    SELECT r.event_id,e.user_id,r.occurrence FROM reminders r
+                    JOIN events e ON e.id=r.event_id;
+                DELETE FROM reminders;
+            """)
 
     @contextmanager
     def connect(self):
@@ -115,7 +129,7 @@ class Store:
         with self.connect() as db:
             result = db.execute(
                 """INSERT INTO events
-                (user_id,title,starts,timezone,repeat,reminder,created_at) VALUES (?,?,?,?,?,?,?)""",
+                (user_id,title,starts,timezone,repeat,reminder,created_at,visibility) VALUES (?,?,?,?,?,?,?,?)""",
                 (
                     uid,
                     draft["title"],
@@ -124,6 +138,7 @@ class Store:
                     draft["repeat"],
                     reminder,
                     datetime.now(UTC).isoformat(),
+                    draft.get("visibility", "public"),
                 ),
             )
             return result.lastrowid
@@ -141,6 +156,19 @@ class Store:
             return db.execute(
                 "SELECT * FROM events WHERE id=? AND user_id=?", (event_id, uid)
             ).fetchone()
+
+    def visible_events(self, uid):
+        with self.connect() as db:
+            return db.execute(
+                "SELECT * FROM events WHERE user_id=? OR visibility='public' ORDER BY starts,id",
+                (uid,),
+            ).fetchall()
+
+    def recipients(self, event):
+        if event["visibility"] == "private":
+            return [event["user_id"]]
+        with self.connect() as db:
+            return [row[0] for row in db.execute("SELECT id FROM users")]
 
     def delete(self, uid, event_id):
         with self.connect() as db:
@@ -164,7 +192,7 @@ class Store:
             now = datetime.now(UTC).isoformat()
             db.execute(
                 """UPDATE events SET title=?, starts=?, timezone=?, repeat=?,
-                       reminder=?, created_at=? WHERE id=? AND user_id=?""",
+                       reminder=?, created_at=?, visibility=? WHERE id=? AND user_id=?""",
                 (
                     draft["title"],
                     draft["starts"],
@@ -172,33 +200,46 @@ class Store:
                     draft["repeat"],
                     draft["reminder"],
                     now if changed else row["created_at"],
+                    draft["visibility"],
                     event_id,
                     uid,
                 ),
             )
             if changed:
                 db.execute(
-                    "DELETE FROM reminders WHERE event_id=? AND occurrence>=?",
+                    "DELETE FROM deliveries WHERE event_id=? AND occurrence>=?",
                     (event_id, now),
                 )
             return True
 
-    def sent(self, event_id, start):
+    def sent(self, event_id, start, uid=None):
         with self.connect() as db:
+            if uid is None:
+                owner = db.execute(
+                    "SELECT user_id FROM events WHERE id=?", (event_id,)
+                ).fetchone()
+                uid = owner[0] if owner else None
             return (
                 db.execute(
-                    "SELECT 1 FROM reminders WHERE event_id=? AND occurrence=?",
-                    (event_id, start.isoformat()),
+                    "SELECT 1 FROM deliveries WHERE event_id=? AND occurrence=? AND user_id=?",
+                    (event_id, start.isoformat(), uid),
                 ).fetchone()
                 is not None
             )
 
-    def mark_sent(self, event_id, start):
+    def mark_sent(self, event_id, start, uid=None):
         with self.connect() as db:
+            if uid is None:
+                owner = db.execute(
+                    "SELECT user_id FROM events WHERE id=?", (event_id,)
+                ).fetchone()
+                if owner is None:
+                    return
+                uid = owner[0]
             db.execute(
-                "INSERT OR IGNORE INTO reminders(event_id,occurrence) "
-                "SELECT id, ? FROM events WHERE id=?",
-                (start.isoformat(), event_id),
+                "INSERT OR IGNORE INTO deliveries(event_id,user_id,occurrence) "
+                "SELECT id, ?, ? FROM events WHERE id=?",
+                (uid, start.isoformat(), event_id),
             )
 
 
@@ -212,7 +253,8 @@ def due_reminders(store, now):
             due = start - lead
             if event["created_at"]:
                 due = max(due, datetime.fromisoformat(event["created_at"]))
-            if now - timedelta(hours=24) <= due <= now and not store.sent(
-                event["id"], start
+            if now - timedelta(hours=24) <= due <= now and any(
+                not store.sent(event["id"], start, uid)
+                for uid in store.recipients(event)
             ):
                 yield event, start

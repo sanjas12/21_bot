@@ -35,11 +35,13 @@ REMINDERS = {
     "За неделю": 10080,
 }
 PAGE_SIZE = 3
+VISIBILITY = {"Общее (по умолчанию)": "public", "Личное": "private"}
 EDIT_FIELDS = [
     "Текст",
     "Дата и время",
     "Повтор",
     "Напоминание",
+    "Доступ",
     "Сохранить изменения",
     "Отмена",
 ]
@@ -100,7 +102,7 @@ class MyBot:
         elif text in MENU:
             self.drafts.pop(uid, None)
             if text == MENU[0]:
-                self.drafts[uid] = {"step": "title"}
+                self.drafts[uid] = {"step": "title", "visibility": "public"}
                 self.say(
                     uid, "Название или текст заметки (до 500 символов):", ["Отмена"]
                 )
@@ -147,6 +149,9 @@ class MyBot:
             elif text == "Напоминание":
                 draft["step"] = "reminder"
                 self.say(uid, "Когда напомнить?", [*REMINDERS, "Отмена"])
+            elif text == "Доступ":
+                draft["step"] = "visibility"
+                self.say(uid, "Кому доступно событие?", [*VISIBILITY, "Отмена"])
             elif text == "Сохранить изменения":
                 self.save_edit(uid)
             else:
@@ -211,6 +216,22 @@ class MyBot:
                 draft["reminder"] = REMINDERS[text]
                 self.edit_summary(uid)
                 return
+            draft.update(reminder=REMINDERS[text], step="visibility")
+            self.say(
+                uid,
+                "Кому доступно событие? По умолчанию — общее.\n"
+                "Общее увидят все пользователи бота; напоминания тоже придут всем.\n"
+                "Личное видно только вам. Выберите вариант для сохранения.",
+                [*VISIBILITY, "Отмена"],
+            )
+        elif step == "visibility":
+            if text not in VISIBILITY:
+                self.say(uid, "Выберите доступ кнопкой.", [*VISIBILITY, "Отмена"])
+                return
+            draft["visibility"] = VISIBILITY[text]
+            if "event_id" in draft:
+                self.edit_summary(uid)
+                return
             start = datetime.fromisoformat(draft["starts"]).replace(
                 tzinfo=ZoneInfo(draft["timezone"])
             )
@@ -219,13 +240,13 @@ class MyBot:
                 draft["step"] = "date"
                 self.ask_date(uid, draft)
                 return
-            event_id = self.store.add(uid, draft, REMINDERS[text])
+            event_id = self.store.add(uid, draft, draft["reminder"])
             self.drafts.pop(uid)
             self.say(
                 uid,
                 f"Сохранено #{event_id}: {draft['title']}\n"
                 f"{start:%d.%m.%Y %H:%M} ({draft['timezone']})\n"
-                f"{REPEATS[draft['repeat']]}. {text}.",
+                f"{REPEATS[draft['repeat']]}. {'Общее' if draft['visibility'] == 'public' else 'Личное'}.",
             )
 
     def begin_edit(self, uid, event_id):
@@ -252,6 +273,7 @@ class MyBot:
             f"Редактирование #{draft['event_id']}\n{draft['title']}\n"
             f"Дата начала: {date:%d.%m.%Y %H:%M} ({draft['timezone']})\n"
             f"{REPEATS[draft['repeat']]}. {reminder}.\n"
+            f"Доступ: {'общее для всех' if draft['visibility'] == 'public' else 'личное'}.\n"
             "Выберите поле. Изменения вступят в силу после сохранения.\n"
             "Для повтора изменяется вся серия.",
             EDIT_FIELDS,
@@ -270,7 +292,8 @@ class MyBot:
         with self.event_lock:
             saved = self.store.update(uid, draft["event_id"], draft)
         self.drafts.pop(uid)
-        self.pages.pop(uid, None)
+        self.pages.clear()
+        self.page_events.clear()
         self.say(
             uid,
             "Изменения сохранены."
@@ -366,15 +389,16 @@ class MyBot:
             else add_months(local, 1 if period == 2 else 12)
         )
         rows = []
-        for event in self.store.events(uid):
+        for event in self.store.visible_events(uid):
             for start in occurrences(event, now, end):
                 date = start.astimezone(zone)
                 rows.append(
                     (
                         start,
                         f"{date:%d.%m.%Y %H:%M} — {event['title']}\n"
-                        f"#{event['id']} · {REPEATS[event['repeat']]}",
-                        event["id"],
+                        f"#{event['id']} · {REPEATS[event['repeat']]} · "
+                        f"{'🌐 Общее' if event['visibility'] == 'public' else '🔒 Личное'}",
+                        event["id"] if event["user_id"] == uid else None,
                     )
                 )
         rows.sort(key=lambda row: row[0])
@@ -398,6 +422,8 @@ class MyBot:
             for event_id in dict.fromkeys(
                 event_snapshot[1][page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
             ):
+                if event_id is None:
+                    continue
                 buttons.add(
                     types.InlineKeyboardButton(
                         f"✏️ Редактировать #{event_id}", callback_data=f"edit:{event_id}"
@@ -472,7 +498,8 @@ class MyBot:
         elif len(parts) == 2 and parts[0] == "delete" and parts[1].isdigit():
             with self.event_lock:
                 deleted = self.store.delete(uid, int(parts[1]))
-            self.pages.pop(uid, None)
+            self.pages.clear()
+            self.page_events.clear()
             self.say(
                 uid,
                 "Событие удалено."
@@ -486,19 +513,28 @@ class MyBot:
 
     def deliver_reminders(self, now=None):
         for event, start in due_reminders(self.store, now or datetime.now(UTC)):
-            try:
-                if self.store.get(event["user_id"], event["id"]) is None:
+            current = self.store.get(event["user_id"], event["id"])
+            if current is None:
+                continue
+            for uid in self.store.recipients(current):
+                if self.store.sent(event["id"], start, uid):
                     continue
-                zone = ZoneInfo(self.store.timezone(event["user_id"]))
-                date = start.astimezone(zone)
-                self.bot.send_message(
-                    event["user_id"],
-                    f"🔔 Напоминание\n{event['title']}\n"
-                    f"{date:%d.%m.%Y %H:%M} ({zone.key}) · #{event['id']}",
-                )
-                self.store.mark_sent(event["id"], start)
-            except Exception:
-                LOG.exception("Cannot deliver reminder for event %s", event["id"])
+                try:
+                    zone = ZoneInfo(self.store.timezone(uid))
+                    date = start.astimezone(zone)
+                    scope = "Общее" if event["visibility"] == "public" else "Личное"
+                    self.bot.send_message(
+                        uid,
+                        f"🔔 {scope} напоминание\n{event['title']}\n"
+                        f"{date:%d.%m.%Y %H:%M} ({zone.key}) · #{event['id']}",
+                    )
+                    self.store.mark_sent(event["id"], start, uid)
+                except Exception:
+                    LOG.exception(
+                        "Cannot deliver reminder for event %s to user %s",
+                        event["id"],
+                        uid,
+                    )
 
     def reminder_loop(self):
         while not self.stop.is_set():
