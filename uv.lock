@@ -458,6 +458,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "pytelegrambotapi", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
     { name = "python-dotenv", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "tzdata", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [package.dev-dependencies]
@@ -473,6 +474,7 @@ dev = [
 requires-dist = [
     { name = "pytelegrambotapi", specifier = "==4.13.0" },
     { name = "python-dotenv", specifier = "==1.0.0" },
+    { name = "tzdata", specifier = ">=2025.1" },
 ]
 
 [package.metadata.requires-dev]
@@ -498,6 +500,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/3e/3b/c42830804cb2da515d0cb8aa200fb199ce57f7dcc344ff73db9dfe37cf3b/striprtf-0.0.33.tar.gz", hash = "sha256:c2d3d9ff3118df6dab558675f10a31ff8bb999ac1f8921f00c6dc9ea19961f18", size = 8010, upload-time = "2026-08-17T21:11:15.706Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/85/bee751fd2096accfc8b76186d49fbb2871163723e45f1e721e03c3f044ae/striprtf-0.0.33-py3-none-any.whl", hash = "sha256:f9637632a4414de05b1c399ee34d324dc336133ae45769992143a024e0f919ef", size = 8446, upload-time = "2026-08-17T21:11:14.696Z" },
+]
+
+[[package]]
+name = "tzdata"
+version = "2026.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/68/f1b440335057bfce71b6e50a9d09445aa2ecbd08359a337976627b8409e7/tzdata-2026.5.tar.gz", hash = "sha256:8cc73c0a0bfca7dbfa59235d60b2eff82231dee33f53d206db1acd9173cfc0a7", size = 200404, upload-time = "2026-10-03T09:23:14.143Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/21/1e5995a1c920cce14e4bffae20c665ec10e7ed03ab25e006cd741092b718/tzdata-2026.5-py2.py3-none-any.whl", hash = "sha256:b683bd1b6659ddcd810ff02ad09ba821d4bf1065072805063eb35c49617905ac", size = 347996, upload-time = "2026-10-03T09:23:12.535Z" },
 ]
 
 [[package]]
