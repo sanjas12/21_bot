@@ -51,6 +51,12 @@ Open the bot in a private Telegram chat and send `/start`.
   Lists have navigation buttons. Dates use your selected time zone.
 - **Удалить**: use `/delete ID` from the list, then confirm. Deleting a
   recurring event deletes the entire series, not just one occurrence.
+- **Редактировать**: press the edit button below an event list or use `/edit ID`.
+  Change the text, date/time, recurrence or reminder, then choose
+  **Сохранить изменения**. `/cancel` discards the draft. A recurring event is
+  edited as an entire series; its original time zone is retained. Renaming
+  preserves delivered reminders; changing the schedule recalculates future
+  reminders. The event number stays the same.
 - **Часовой пояс**: default `Europe/Moscow`; accepts IANA names such as
   `Asia/Yekaterinburg`. Existing events keep their original time zone.
   Ambiguous autumn times use the first occurrence; recurring times in a spring

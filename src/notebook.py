@@ -150,6 +150,39 @@ class Store:
                 ).rowcount
             )
 
+    def update(self, uid, event_id, draft):
+        """Commit a complete edit atomically; reject stale or foreign records."""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT * FROM events WHERE id=? AND user_id=?", (event_id, uid)
+            ).fetchone()
+            if row is None or dict(row) != draft["original"]:
+                return False
+            timing = ("starts", "timezone", "repeat", "reminder")
+            changed = any(row[key] != draft[key] for key in timing)
+            now = datetime.now(UTC).isoformat()
+            db.execute(
+                """UPDATE events SET title=?, starts=?, timezone=?, repeat=?,
+                       reminder=?, created_at=? WHERE id=? AND user_id=?""",
+                (
+                    draft["title"],
+                    draft["starts"],
+                    draft["timezone"],
+                    draft["repeat"],
+                    draft["reminder"],
+                    now if changed else row["created_at"],
+                    event_id,
+                    uid,
+                ),
+            )
+            if changed:
+                db.execute(
+                    "DELETE FROM reminders WHERE event_id=? AND occurrence>=?",
+                    (event_id, now),
+                )
+            return True
+
     def sent(self, event_id, start):
         with self.connect() as db:
             return (

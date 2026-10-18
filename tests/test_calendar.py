@@ -104,6 +104,79 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(saved[0]["repeat"], "monthly")
         self.assertEqual(saved[0]["reminder"], 60)
 
+    def test_edit_all_fields_and_confirm(self):
+        eid = self.store.add(1, event(), 60)
+        self.app.handle(self.message(f"/edit {eid}"))
+        for text in ("Текст", "Изменённый текст", "Дата и время"):
+            self.app.handle(self.message(text))
+        self.click_date("day", "2030-03-10")
+        self.click_date("hour", "16")
+        self.click_date("minute", "25")
+        self.assertEqual(self.app.drafts[1]["step"], "edit_fields")
+        for text in ("Повтор", "Еженедельно", "Напоминание", "За день"):
+            self.app.handle(self.message(text))
+        self.assertEqual(self.store.get(1, eid)["title"], "Встреча")
+        self.app.handle(self.message("Сохранить изменения"))
+        row = Store(self.path).get(1, eid)
+        self.assertEqual(row["title"], "Изменённый текст")
+        self.assertEqual(row["starts"], "2030-03-10T16:25:00")
+        self.assertEqual(row["repeat"], "weekly")
+        self.assertEqual(row["reminder"], 1440)
+
+    def test_edit_cancel_preserves_original_and_foreign_event_is_denied(self):
+        eid = self.store.add(1, event(), 60)
+        original = dict(self.store.get(1, eid))
+        for text in (f"/edit {eid}", "Текст", "Не сохранять", "/cancel"):
+            self.app.handle(self.message(text))
+        self.assertEqual(dict(self.store.get(1, eid)), original)
+        self.app.handle(self.message(f"/edit {eid}", uid=2))
+        self.assertNotIn(2, self.app.drafts)
+
+    def test_edit_title_does_not_resend_delivered_reminder(self):
+        eid = self.store.add(1, event("2030-01-01T10:00:00", "once"), 60)
+        now = utc("2030-01-01T06:00:00")
+        self.app.remind_once(now)
+        for text in (f"/edit {eid}", "Текст", "Новое название", "Сохранить изменения"):
+            self.app.handle(self.message(text))
+        self.assertEqual(list(due_reminders(self.store, now)), [])
+
+    def test_edit_reschedules_reminder(self):
+        eid = self.store.add(1, event("2030-01-01T10:00:00", "once"), 60)
+        self.app.remind_once(utc("2030-01-01T06:00:00"))
+        for text in (
+            f"/edit {eid}",
+            "Дата и время",
+            "01.01.2030 12:00",
+            "Сохранить изменения",
+        ):
+            self.app.handle(self.message(text))
+        self.assertEqual(
+            list(due_reminders(self.store, utc("2030-01-01T06:00:00"))), []
+        )
+        due = list(due_reminders(self.store, utc("2030-01-01T08:00:00")))
+        self.assertEqual(len(due), 1)
+        self.assertEqual(due[0][1], utc("2030-01-01T09:00:00"))
+
+    def test_edit_cannot_restore_deleted_event(self):
+        eid = self.store.add(1, event(), 60)
+        self.app.handle(self.message(f"/edit {eid}"))
+        self.store.delete(1, eid)
+        self.app.handle(self.message("Сохранить изменения"))
+        self.assertIsNone(self.store.get(1, eid))
+        self.assertNotIn(1, self.app.drafts)
+
+    def test_stale_edit_does_not_overwrite_newer_change(self):
+        eid = self.store.add(1, event(), 60)
+        self.app.handle(self.message(f"/edit {eid}"))
+        current = dict(self.store.get(1, eid))
+        self.assertTrue(
+            self.store.update(
+                1, eid, {**current, "title": "Другая правка", "original": current}
+            )
+        )
+        self.app.handle(self.message("Сохранить изменения"))
+        self.assertEqual(self.store.get(1, eid)["title"], "Другая правка")
+
     def click_date(self, action, value="", uid=1, token=None):
         token = token or self.app.drafts[uid]["picker_token"]
         message = self.message("", uid)

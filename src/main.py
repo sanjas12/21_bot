@@ -24,6 +24,7 @@ MENU = [
     "📆 Год",
     "🗑 Удалить",
     "🌍 Часовой пояс",
+    "✏️ Редактировать",
 ]
 REMINDERS = {
     "Без уведомления": -1,
@@ -34,6 +35,14 @@ REMINDERS = {
     "За неделю": 10080,
 }
 PAGE_SIZE = 3
+EDIT_FIELDS = [
+    "Текст",
+    "Дата и время",
+    "Повтор",
+    "Напоминание",
+    "Сохранить изменения",
+    "Отмена",
+]
 
 
 def keyboard(labels):
@@ -48,7 +57,9 @@ class MyBot:
         self.store = store
         self.drafts = {}
         self.pages = {}
+        self.page_events = {}
         self.stop = threading.Event()
+        self.event_lock = threading.RLock()
         self.bot.message_handler(content_types=["text"])(self.handle)
         self.bot.callback_query_handler(func=lambda call: True)(self.callback)
 
@@ -72,6 +83,20 @@ class MyBot:
             )
         elif text.startswith("/delete"):
             self.confirm_delete(uid, text)
+        elif text.startswith("/edit"):
+            parts = text.split()
+            if (
+                len(parts) == 2
+                and parts[1].isascii()
+                and parts[1].isdigit()
+                and len(parts[1]) <= 18
+            ):
+                self.begin_edit(uid, int(parts[1]))
+            else:
+                self.say(
+                    uid,
+                    "Введите /edit ID, например /edit 12. Номер # есть в списке событий.",
+                )
         elif text in MENU:
             self.drafts.pop(uid, None)
             if text == MENU[0]:
@@ -93,6 +118,12 @@ class MyBot:
                     "Уже созданные события сохранят свой пояс.",
                     ["Отмена"],
                 )
+            elif text == MENU[6]:
+                self.say(
+                    uid,
+                    "Введите /edit ID, например /edit 12. Номер # есть в списке событий.\n"
+                    "У повторяющегося события изменяется вся серия.",
+                )
             else:
                 self.show_events(uid, MENU.index(text))
         elif uid in self.drafts:
@@ -103,7 +134,24 @@ class MyBot:
     def advance(self, uid, text):
         draft = self.drafts[uid]
         step = draft["step"]
-        if step == "timezone":
+        if step == "edit_fields":
+            if text == "Текст":
+                draft["step"] = "title"
+                self.say(uid, "Введите новый текст (до 500 символов).", ["Отмена"])
+            elif text == "Дата и время":
+                draft["step"] = "date"
+                self.ask_date(uid, draft)
+            elif text == "Повтор":
+                draft["step"] = "repeat"
+                self.say(uid, "Как часто повторять?", [*REPEATS.values(), "Отмена"])
+            elif text == "Напоминание":
+                draft["step"] = "reminder"
+                self.say(uid, "Когда напомнить?", [*REMINDERS, "Отмена"])
+            elif text == "Сохранить изменения":
+                self.save_edit(uid)
+            else:
+                self.edit_summary(uid)
+        elif step == "timezone":
             try:
                 ZoneInfo(text)
             except (ZoneInfoNotFoundError, ValueError):
@@ -115,6 +163,10 @@ class MyBot:
         elif step == "title":
             if not 1 <= len(text) <= 500:
                 self.say(uid, "Нужно от 1 до 500 символов.", ["Отмена"])
+                return
+            if "event_id" in draft:
+                draft["title"] = text
+                self.edit_summary(uid)
                 return
             draft.update(title=text, step="date", timezone=self.store.timezone(uid))
             self.ask_date(uid, draft)
@@ -137,6 +189,9 @@ class MyBot:
                 )
                 return
             draft.update(starts=local.isoformat(), step="repeat")
+            if "event_id" in draft:
+                self.edit_summary(uid)
+                return
             self.say(uid, "Как часто повторять?", [*REPEATS.values(), "Отмена"])
         elif step == "repeat":
             choices = {label: key for key, label in REPEATS.items()}
@@ -144,14 +199,22 @@ class MyBot:
                 self.say(uid, "Выберите период кнопкой.", [*REPEATS.values(), "Отмена"])
                 return
             draft.update(repeat=choices[text], step="reminder")
+            if "event_id" in draft:
+                self.edit_summary(uid)
+                return
             self.say(uid, "Когда напомнить?", [*REMINDERS, "Отмена"])
         elif step == "reminder":
             if text not in REMINDERS:
                 self.say(uid, "Выберите интервал кнопкой.", [*REMINDERS, "Отмена"])
                 return
+            if "event_id" in draft:
+                draft["reminder"] = REMINDERS[text]
+                self.edit_summary(uid)
+                return
             start = datetime.fromisoformat(draft["starts"]).replace(
                 tzinfo=ZoneInfo(draft["timezone"])
             )
+
             if start <= datetime.now(UTC):
                 draft["step"] = "date"
                 self.ask_date(uid, draft)
@@ -164,6 +227,56 @@ class MyBot:
                 f"{start:%d.%m.%Y %H:%M} ({draft['timezone']})\n"
                 f"{REPEATS[draft['repeat']]}. {text}.",
             )
+
+    def begin_edit(self, uid, event_id):
+        event = self.store.get(uid, event_id)
+        if event is None:
+            self.say(uid, "Событие не найдено или недоступно.")
+            return
+        self.drafts[uid] = {
+            **dict(event),
+            "event_id": event_id,
+            "original": dict(event),
+        }
+        self.edit_summary(uid)
+
+    def edit_summary(self, uid):
+        draft = self.drafts[uid]
+        draft["step"] = "edit_fields"
+        date = datetime.fromisoformat(draft["starts"])
+        reminder = next(
+            label for label, value in REMINDERS.items() if value == draft["reminder"]
+        )
+        self.say(
+            uid,
+            f"Редактирование #{draft['event_id']}\n{draft['title']}\n"
+            f"Дата начала: {date:%d.%m.%Y %H:%M} ({draft['timezone']})\n"
+            f"{REPEATS[draft['repeat']]}. {reminder}.\n"
+            "Выберите поле. Изменения вступят в силу после сохранения.\n"
+            "Для повтора изменяется вся серия.",
+            EDIT_FIELDS,
+        )
+
+    def save_edit(self, uid):
+        draft = self.drafts[uid]
+        start = datetime.fromisoformat(draft["starts"]).replace(
+            tzinfo=ZoneInfo(draft["timezone"])
+        )
+        if draft["repeat"] == "once" and start <= datetime.now(UTC):
+            draft["step"] = "date"
+            self.say(uid, "Для разового события выберите будущую дату.", ["Отмена"])
+            self.ask_date(uid, draft)
+            return
+        with self.event_lock:
+            saved = self.store.update(uid, draft["event_id"], draft)
+        self.drafts.pop(uid)
+        self.pages.pop(uid, None)
+        self.say(
+            uid,
+            "Изменения сохранены."
+            if saved
+            else "Запись удалена или уже изменена. Откройте её заново через /edit ID.",
+        )
 
     def ask_date(self, uid, draft):
         self.say(
@@ -232,7 +345,7 @@ class MyBot:
             elif action == "minute" and stage == "minute" and 0 <= int(value) <= 59:
                 text = f"{draft['day']:%d.%m.%Y} {draft['hour']:02d}:{int(value):02d}"
                 self.advance(uid, text)
-                if draft["step"] == "repeat":
+                if draft["step"] in ("repeat", "edit_fields"):
                     self.bot.edit_message_text(
                         f"Выбрано: {text} ({draft['timezone']})", uid, message_id
                     )
@@ -261,11 +374,13 @@ class MyBot:
                         start,
                         f"{date:%d.%m.%Y %H:%M} — {event['title']}\n"
                         f"#{event['id']} · {REPEATS[event['repeat']]}",
+                        event["id"],
                     )
                 )
         rows.sort(key=lambda row: row[0])
         token = uuid4().hex[:12]
         self.pages[uid] = (token, [row[1] for row in rows], zone.key)
+        self.page_events[uid] = (token, [row[2] for row in rows])
         self.render_page(uid, token, 0)
 
     def render_page(self, uid, token, page):
@@ -278,6 +393,16 @@ class MyBot:
         if not 0 <= page < count:
             return
         buttons = types.InlineKeyboardMarkup()
+        event_snapshot = self.page_events.get(uid)
+        if event_snapshot and event_snapshot[0] == token:
+            for event_id in dict.fromkeys(
+                event_snapshot[1][page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
+            ):
+                buttons.add(
+                    types.InlineKeyboardButton(
+                        f"✏️ Редактировать #{event_id}", callback_data=f"edit:{event_id}"
+                    )
+                )
         if page:
             buttons.add(
                 types.InlineKeyboardButton(
@@ -337,8 +462,16 @@ class MyBot:
             self.pick_date(uid, parts, call.message.message_id)
         elif len(parts) == 3 and parts[0] == "page" and parts[2].isdigit():
             self.render_page(uid, parts[1], int(parts[2]))
+        elif (
+            len(parts) == 2
+            and parts[0] == "edit"
+            and parts[1].isdigit()
+            and len(parts[1]) <= 18
+        ):
+            self.begin_edit(uid, int(parts[1]))
         elif len(parts) == 2 and parts[0] == "delete" and parts[1].isdigit():
-            deleted = self.store.delete(uid, int(parts[1]))
+            with self.event_lock:
+                deleted = self.store.delete(uid, int(parts[1]))
             self.pages.pop(uid, None)
             self.say(
                 uid,
@@ -348,6 +481,10 @@ class MyBot:
             )
 
     def remind_once(self, now=None):
+        with self.event_lock:
+            self.deliver_reminders(now)
+
+    def deliver_reminders(self, now=None):
         for event, start in due_reminders(self.store, now or datetime.now(UTC)):
             try:
                 if self.store.get(event["user_id"], event["id"]) is None:
