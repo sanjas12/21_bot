@@ -37,3 +37,4 @@ MANIFEST
 
 # Project
 logs/
+*sqlite3

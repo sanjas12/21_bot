@@ -28,6 +28,12 @@ Bot sources are in `src/`; the entry point is `src/main.py`.
 ### Usage (Ubuntu)
 1. Run `bash start.sh`.
 
+Развёртывание на сервере, настройка Mihomo с HTTPS-подпиской, прокси для бота,
+автозапуск, перезапуск после сбоя и просмотр логов описаны в
+[инструкции для Ubuntu](docs/ubuntu-deployment.md).
+Шаблоны служб: [21-bot.service](deploy/systemd/21-bot.service) и
+[mihomo.service](deploy/systemd/mihomo.service).
+
 The bot loads the root `.env` file and runs from `src/main.py`.
 Direct launch from the project root:
 

@@ -1,0 +1,20 @@
+[Unit]
+Description=21_bot Telegram calendar
+Wants=network-online.target mihomo.service
+After=network-online.target mihomo.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/21_bot
+Environment="PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash /root/21_bot/start.sh
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
