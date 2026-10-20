@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# версия: 0.1
+# версия: 0.2
 
 # Сам release.sh автоматически объединять ветки не должен: выпуск релиза и
-# решение о переносе изменений в master лучше оставлять отдельными операциями.
-# Использовать только для выпуска готовой версии из ветки master, когда все
+# решение о переносе изменений в основную ветку лучше оставлять отдельными операциями.
+# Использовать только для выпуска готовой версии из основной ветки, когда все
 # изменения уже закоммичены и рабочее дерево Git чистое. Запускать в Windows
-# из Git Bash командой `bash scripts/release.sh`: скрипт обновляет master,
+# из Git Bash командой `bash scripts/release.sh`: скрипт обновляет основную ветку,
 # запускает тесты, повышает версию через Commitizen, создаёт коммит и тег,
 # а затем отправляет релиз в origin. Для обычной разработки не запускать.
 
 # 1. Логирование        — пишет лог в logs/release_ДАТА.log
-# 2. Git checkout       — переключается на master, pull и проверяет develop
+# 2. Git checkout       — переключается на основную ветку, pull и проверяет develop
 # 3. Проверки           — синтаксис, все тесты, pre-commit и mypy
 # 4. Коммиты            — показывает что войдёт в релиз
 # 5. Меню               — авто / PATCH / MINOR / MAJOR / вручную
@@ -60,33 +60,56 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-# ─── Git: переключаемся на master ─────────────────────────────
+# ─── Выбор основной ветки ────────────────────────────────────
+# origin/HEAD определяет приоритет, если существуют обе ветки.
+RELEASE_BRANCH=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD || true)
+RELEASE_BRANCH=${RELEASE_BRANCH#origin/}
+case "$RELEASE_BRANCH" in
+    main|master) ;;
+    *) RELEASE_BRANCH="" ;;
+esac
+if [ -z "$RELEASE_BRANCH" ]; then
+    for candidate in main master; do
+        if git show-ref --verify --quiet "refs/heads/$candidate" ||
+           git show-ref --verify --quiet "refs/remotes/origin/$candidate"; then
+            RELEASE_BRANCH=$candidate
+            break
+        fi
+    done
+fi
+if [ -z "$RELEASE_BRANCH" ]; then
+    log_error "Не найдена основная ветка main или master (локально или в origin)."
+    exit 1
+fi
+log_info "Ветка релиза: $RELEASE_BRANCH"
+
+# ─── Git: переключаемся на основную ветку ─────────────────────
 echo ""
-log_info "Переключаемся на master"
-if ! git checkout master; then
-    log_error "Не удалось переключиться на master"
+log_info "Переключаемся на $RELEASE_BRANCH"
+if ! git checkout "$RELEASE_BRANCH"; then
+    log_error "Не удалось переключиться на $RELEASE_BRANCH"
     exit 1
 fi
 
 log_info "Получаем изменения с remote"
-if ! git pull origin master; then
+if ! git pull --ff-only origin "$RELEASE_BRANCH"; then
     log_error "Не удалось выполнить git pull. Проверь подключение к remote."
     exit 1
 fi
-log_ok "master актуален"
+log_ok "$RELEASE_BRANCH актуальна"
 
 # release.sh не объединяет ветки автоматически, но не должен выпускать
-# устаревший master, если в локальном develop остались неслитые изменения.
+# устаревшую основную ветку, если в локальном develop остались неслитые изменения.
 if git show-ref --verify --quiet refs/heads/develop; then
-    if ! git merge-base --is-ancestor develop master; then
-        log_error "Ветка develop содержит изменения, которых ещё нет в master."
-        log_error "Релиз из устаревшего master отменён. Выполни:"
-        log_error "  git checkout master"
+    if ! git merge-base --is-ancestor develop "$RELEASE_BRANCH"; then
+        log_error "Ветка develop содержит изменения, которых ещё нет в основную ветку."
+        log_error "Релиз из устаревшей $RELEASE_BRANCH отменён. Выполни:"
+        log_error "  git checkout $RELEASE_BRANCH"
         log_error "  git merge --ff-only develop"
         log_error "Затем повторно запусти bash scripts/release.sh."
         exit 1
     fi
-    log_ok "Все локальные изменения develop уже включены в master"
+    log_ok "Все локальные изменения develop уже включены в основную ветку"
 elif [ "$START_BRANCH" = "develop" ]; then
     log_error "До переключения была активна develop, но локальная ветка больше не найдена."
     exit 1
@@ -277,8 +300,8 @@ verify_versions "$NEW_VERSION"
 
 # ─── Push ─────────────────────────────────────────────────────
 log_info "Пушим в remote"
-if ! git push origin master; then
-    log_error "Не удалось отправить ветку master"
+if ! git push origin "$RELEASE_BRANCH"; then
+    log_error "Не удалось отправить ветку $RELEASE_BRANCH"
     exit 1
 fi
 if ! git push origin --tags; then
