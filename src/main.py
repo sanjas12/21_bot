@@ -82,8 +82,12 @@ class MyBot:
             self.say(
                 uid,
                 "Личный календарь: добавляйте события и смотрите планы.\n"
-                f"Часовой пояс: {self.store.timezone(uid)}.\n/cancel — отменить ввод.",
+                f"Часовой пояс: {self.store.timezone(uid)}.\n/cancel — отменить ввод.\n"
+                "/changelog — история изменений бота.",
             )
+        elif text == "/changelog":
+            with (ROOT / "docs" / "CHANGELOG.md").open("rb") as history:
+                self.bot.send_document(uid, history, caption="История изменений бота")
         elif text.startswith("/delete"):
             self.confirm_delete(uid, text)
         elif text.startswith("/edit"):

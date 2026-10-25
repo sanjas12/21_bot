@@ -100,7 +100,9 @@ by Telegram user for personal events; shared events are visible to everyone.
 Group chats are not used for calendar management.
 
 After a successful release deployment, existing users receive a message with
-the new version and the GitHub Release description. Notifications are queued
+the new version and its section from [docs/CHANGELOG.md](docs/CHANGELOG.md).
+The release script updates this cumulative history from Git commits; `/changelog`
+sends the complete history file in the bot. Notifications are queued
 in SQLite and checked every 30 seconds, up to 20 recipients per pass. Successful
 deliveries are not repeated on restart or redeployment of the same version.
 Temporary failures are retried; users who blocked the bot are skipped.

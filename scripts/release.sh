@@ -11,7 +11,8 @@
 # а затем публикует GitHub Release. Для обычной разработки не запускать.
 
 # Версия проекта хранится в [project].version; Commitizen не требуется.
-# После проверок создаёт коммит и тег, публикует GitHub Release через gh.
+# После проверок обновляет docs/CHANGELOG.md, создаёт коммит и тег,
+# публикует GitHub Release через gh с тем же разделом изменений.
 # Публикация запускает автодеплой. Для работы нужны uv, Git и gh auth login.
 
 set -euo pipefail
@@ -222,22 +223,26 @@ read -r -p "Выпустить $CURRENT → $NEW_VERSION и запустить �
 [ "$confirm" = y ] || { log_info "Отменено"; exit 0; }
 
 uv run --locked python scripts/release_version.py write "$NEW_VERSION"
+uv run --frozen python scripts/update_changelog.py "$NEW_VERSION" "$LAST_RELEASE_TAG"
 uv lock
 uv sync --locked --group dev
 uv run --locked pre-commit run --all-files
 # Include the helper in checks: pre-commit's mypy hook checks only src/.
-uv run --locked ruff check scripts/release_version.py
+uv run --locked ruff check scripts/release_version.py scripts/update_changelog.py
 uv run --locked python -m unittest discover -s tests -v
 test "$(uv run --locked python scripts/release_version.py current)" = "$NEW_VERSION"
-git add -- pyproject.toml uv.lock
+git add -- pyproject.toml uv.lock docs/CHANGELOG.md
 git commit -m "bump: release $NEW_VERSION"
 test -z "$(git status --porcelain)" || { log_error "После коммита остались изменения"; exit 1; }
 git tag -a "$TAG" -m "Release $NEW_VERSION"
 # Send only this release tag together with the branch; never push unrelated tags.
 git push --atomic origin "$RELEASE_BRANCH" "refs/tags/$TAG"
-if ! gh release create "$TAG" --repo "$REPOSITORY" --verify-tag --title "$TAG" --generate-notes; then
+NOTES_FILE=$(mktemp)
+trap 'EXIT_CODE=$?; rm -f -- "$NOTES_FILE"; if [ "$EXIT_CODE" -ne 0 ]; then log_error "Ошибка публикации. См. $LOG_FILE"; fi' EXIT
+uv run --locked python -c 'import sys; from pathlib import Path; sys.path.insert(0, "src"); from changelog import release_notes; Path(sys.argv[2]).write_text(release_notes(Path("docs/CHANGELOG.md").read_text(encoding="utf-8"), sys.argv[1]), encoding="utf-8")' "$TAG" "$NOTES_FILE"
+if ! gh release create "$TAG" --repo "$REPOSITORY" --verify-tag --title "$TAG" --notes-file "$NOTES_FILE"; then
     log_error "Коммит и тег отправлены, но GitHub Release не опубликован."
-    log_error "Повторите только: gh release create $TAG --repo $REPOSITORY --verify-tag --title $TAG --generate-notes"
+    log_error "Повторите публикацию через Releases на GitHub, скопировав раздел $NEW_VERSION из docs/CHANGELOG.md. Тег уже отправлен."
     exit 1
 fi
 log_ok "GitHub Release $TAG опубликован. Автодеплой запущен; результат смотрите в Actions."

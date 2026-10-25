@@ -1,9 +1,9 @@
 """Queue release notes after successful deployment; never contact Telegram here."""
 
-import base64
 import sys
 from pathlib import Path
 
+from changelog import release_notes
 from notebook import Store
 
 
@@ -16,9 +16,11 @@ def release_message(version, notes):
 
 
 def main():
-    version, encoded = sys.argv[1:3]
-    notes = base64.b64decode(encoded, validate=True).decode("utf-8")
+    version = sys.argv[1]
     root = Path(__file__).resolve().parent.parent
+    notes = release_notes(
+        (root / "docs" / "CHANGELOG.md").read_text(encoding="utf-8"), version
+    )
     Store(root / "data" / "calendar.sqlite3").queue_release(
         version, release_message(version, notes)
     )

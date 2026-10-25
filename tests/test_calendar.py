@@ -161,6 +161,21 @@ class CalendarTests(unittest.TestCase):
         self.assertIn("Полный список", message)
         self.assertIn("Исправления", release_message("v0.0.4", ""))
 
+    def test_changelog_command_sends_complete_history(self):
+        root = Path(self.temp.name)
+        (root / "docs").mkdir()
+        content = "# История\n\n## 0.0.4\n\n- Новое\n\n## 0.0.3\n\n- Старое\n"
+        (root / "docs" / "CHANGELOG.md").write_text(
+            content, encoding="utf-8", newline="\n"
+        )
+        received = []
+        self.api.send_document.side_effect = lambda uid, history, **kw: received.append(
+            (uid, history.read())
+        )
+        with patch("main.ROOT", root):
+            self.app.handle(self.message("/changelog"))
+        self.assertEqual(received, [(1, content.encode("utf-8"))])
+
     def test_edit_all_fields_and_confirm(self):
         eid = self.store.add(1, event(), 60)
         self.app.handle(self.message(f"/edit {eid}"))
