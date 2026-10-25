@@ -34,6 +34,9 @@ Bot sources are in `src/`; the entry point is `src/main.py`.
 Шаблоны служб: [21-bot.service](deploy/systemd/21-bot.service) и
 [mihomo.service](deploy/systemd/mihomo.service).
 
+Автоматическое обновление сервера после публикации GitHub Release:
+[настройка GitHub Actions](docs/automatic-deployment.md).
+
 The bot loads the root `.env` file and runs from `src/main.py`.
 Direct launch from the project root:
 
