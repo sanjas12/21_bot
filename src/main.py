@@ -25,6 +25,7 @@ MENU = [
     "🗑 Удалить",
     "🌍 Часовой пояс",
     "✏️ Редактировать",
+    "📋 Сегодня",
 ]
 REMINDERS = {
     "Без уведомления": -1,
@@ -383,11 +384,16 @@ class MyBot:
         zone = ZoneInfo(self.store.timezone(uid))
         now = datetime.now(UTC)
         local = now.astimezone(zone)
-        end = (
-            local + timedelta(days=7)
-            if period == 1
-            else add_months(local, 1 if period == 2 else 12)
-        )
+        if period == 7:
+            local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+            now = local.astimezone(UTC)
+            end = (local + timedelta(days=1)).astimezone(UTC)
+        else:
+            end = (
+                local + timedelta(days=7)
+                if period == 1
+                else add_months(local, 1 if period == 2 else 12)
+            )
         rows = []
         for event in self.store.visible_events(uid):
             for start in occurrences(event, now, end):

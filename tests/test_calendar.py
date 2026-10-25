@@ -398,6 +398,39 @@ class CalendarTests(unittest.TestCase):
         text = self.api.send_message.call_args.args[1]
         self.assertLessEqual(len(text.encode("utf-16-le")) // 2, 4096)
 
+    def test_today_uses_full_local_day_and_visibility(self):
+        self.store.set_timezone(1, "Asia/Yekaterinburg")
+        for title, starts in (
+            ("Вчера", "2030-01-01T18:59:59"),
+            ("Полночь", "2030-01-01T19:00:00"),
+            ("Вечер", "2030-01-02T18:59:59"),
+            ("Завтра", "2030-01-02T19:00:00"),
+        ):
+            self.store.add(1, {**event(starts, "once", "UTC"), "title": title}, -1)
+        for title, visibility in (("Общее", "public"), ("Чужое", "private")):
+            self.store.add(
+                2,
+                {
+                    **event("2030-01-01T20:00:00", "daily", "UTC"),
+                    "title": title,
+                    "visibility": visibility,
+                },
+                -1,
+            )
+        with patch("main.datetime") as clock:
+            clock.now.return_value = utc("2030-01-01T23:00:00")
+            self.app.handle(self.message("📋 Сегодня"))
+        rows = self.app.pages[1][1]
+        self.assertEqual(len(rows), 3)
+        self.assertIn("Полночь", rows[0])
+        self.assertIn("Общее", rows[1])
+        self.assertIn("Вечер", rows[2])
+
+    def test_today_can_be_empty(self):
+        self.app.handle(self.message("📋 Сегодня"))
+        self.assertEqual(self.app.pages[1][1], [])
+        self.assertIn("Событий пока нет.", self.api.send_message.call_args.args[1])
+
 
 if __name__ == "__main__":
     unittest.main()
