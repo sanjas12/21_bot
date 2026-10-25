@@ -1,25 +1,20 @@
 #!/bin/bash
 
-# версия: 0.2
+# версия: 0.3
 
 # Сам release.sh автоматически объединять ветки не должен: выпуск релиза и
 # решение о переносе изменений в основную ветку лучше оставлять отдельными операциями.
 # Использовать только для выпуска готовой версии из основной ветки, когда все
 # изменения уже закоммичены и рабочее дерево Git чистое. Запускать в Windows
 # из Git Bash командой `bash scripts/release.sh`: скрипт обновляет основную ветку,
-# запускает тесты, повышает версию через Commitizen, создаёт коммит и тег,
-# а затем отправляет релиз в origin. Для обычной разработки не запускать.
+# запускает тесты, повышает версию проекта, создаёт коммит и тег,
+# а затем публикует GitHub Release. Для обычной разработки не запускать.
 
-# 1. Логирование        — пишет лог в logs/release_ДАТА.log
-# 2. Git checkout       — переключается на основную ветку, pull и проверяет develop
-# 3. Проверки           — синтаксис, все тесты, pre-commit и mypy
-# 4. Коммиты            — показывает что войдёт в релиз
-# 5. Меню               — авто / PATCH / MINOR / MAJOR / вручную
-# 6. Bump               — cz bump с выбранным типом
-# 7. Проверка версий    — сравнивает pyproject.toml и _version.py
-# 8. Push               — только если версии совпали
+# Версия проекта хранится в [project].version; Commitizen не требуется.
+# После проверок создаёт коммит и тег, публикует GitHub Release через gh.
+# Публикация запускает автодеплой. Для работы нужны uv, Git и gh auth login.
 
-set -e
+set -euo pipefail
 
 # Переходим в корень проекта (папка выше scripts/)
 cd "$(dirname "$0")/.."
@@ -59,6 +54,13 @@ if [ -n "$(git status --porcelain)" ]; then
     log_error "Закоммить или отложи их перед запуском release.sh."
     exit 1
 fi
+
+for tool in uv gh; do
+    command -v "$tool" >/dev/null || { log_error "Не найден $tool. Установите его перед выпуском."; exit 1; }
+done
+gh auth status || { log_error "Выполните gh auth login перед выпуском."; exit 1; }
+REPOSITORY=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+git fetch --tags origin
 
 # ─── Выбор основной ветки ────────────────────────────────────
 # origin/HEAD определяет приоритет, если существуют обе ветки.
@@ -118,8 +120,14 @@ else
 fi
 
 # ─── Проверка новых коммитов ──────────────────────────────────
-# Commitizen не создаёт обычный релиз, если после последнего тега нет коммитов.
-LAST_RELEASE_TAG=$(git describe --tags --match '[0-9]*' --abbrev=0 2>/dev/null || true)
+# Не выпускаем повторный релиз без новых коммитов.
+LAST_RELEASE_TAG=""
+while IFS= read -r candidate; do
+    if [[ "$candidate" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        LAST_RELEASE_TAG=$candidate
+        break
+    fi
+done < <(git tag --merged HEAD --sort=-version:refname)
 if [ -n "$LAST_RELEASE_TAG" ]; then
     NEW_COMMIT_COUNT=$(git rev-list "$LAST_RELEASE_TAG"..HEAD --count)
     if [ "$NEW_COMMIT_COUNT" -eq 0 ]; then
@@ -135,28 +143,28 @@ fi
 # ─── Тесты ────────────────────────────────────────────────────
 echo ""
 log_info "Синхронизируем зависимости для тестов из uv.lock"
-if ! uv sync --frozen --group dev; then
+if ! uv sync --locked --group dev; then
     log_error "Не удалось подготовить окружение для тестов! Релиз отменён."
     exit 1
 fi
 log_ok "Тестовое окружение готово"
 
 log_info "Проверяем синтаксис Python"
-if ! uv run --frozen python -m compileall -q src tests; then
+if ! uv run --locked python -m compileall -q src tests; then
     log_error "Синтаксическая проверка не прошла! Релиз отменён."
     exit 1
 fi
 log_ok "Синтаксис Python проверен"
 
 log_info "Запускаем все тесты из каталога tests"
-if ! uv run --frozen pytest tests; then
+if ! uv run --locked python -m unittest discover -s tests -v; then
     log_error "Тесты не прошли! Релиз отменён."
     exit 1
 fi
 log_ok "Все тесты прошли успешно"
 
 log_info "Запускаем pre-commit, включая mypy"
-if ! uv run --frozen pre-commit run --all-files; then
+if ! uv run --locked pre-commit run --all-files; then
     log_error "Pre-commit-проверки не прошли! Исправь изменения и повтори релиз."
     exit 1
 fi
@@ -180,135 +188,57 @@ else
     git log "$LAST_RELEASE_TAG"..HEAD --oneline
 fi
 
-# ─── Текущая версия и предполагаемые bump'ы ───────────────────
-echo ""
-log_info "Определяем версии"
-
-if ! CURRENT=$(uv run --frozen cz version --project 2>&1); then
-    log_error "Не удалось получить текущую версию: $CURRENT"
-    exit 1
-fi
-
-PATCH=$(uv run --frozen cz bump --increment PATCH --dry-run 2>&1 | grep "tag to create" | awk '{print $NF}')
-MINOR=$(uv run --frozen cz bump --increment MINOR --dry-run 2>&1 | grep "tag to create" | awk '{print $NF}')
-MAJOR=$(uv run --frozen cz bump --increment MAJOR --dry-run 2>&1 | grep "tag to create" | awk '{print $NF}')
-
-log_info "Текущая версия: $CURRENT"
-
-echo ""
-echo "Выбери тип релиза:"
-echo "  1) Авто    — определить по коммитам (feat/fix)"
-echo "  2) PATCH   — $CURRENT → $PATCH"
-echo "  3) MINOR   — $CURRENT → $MINOR"
-echo "  4) MAJOR   — $CURRENT → $MAJOR"
-echo "  5) Вручную — ввести версию"
-echo "  0) Отмена"
-echo ""
-read -p "Выбор (0-5): " choice
-log_info "Выбор пользователя: $choice"
-
-# ─── Bump ─────────────────────────────────────────────────────
-do_bump() {
-    local label=$1
-    shift
-    log_info "Запускаем: $*"
-    if ! "$@"; then
-        log_error "Ошибка при bump: $label"
-        exit 1
-    fi
-    log_ok "Bump выполнен: $label"
-}
-
-case $choice in
-    1)
-        uv run --frozen cz bump --dry-run
-        read -p "Продолжить? (y/n): " confirm
-        [ "$confirm" = "y" ] && do_bump "авто" uv run --frozen cz bump || { log_info "Отменено."; exit 0; }
-        ;;
-    2)
-        read -p "Продолжить? $CURRENT → $PATCH (y/n): " confirm
-        [ "$confirm" = "y" ] && do_bump "PATCH" uv run --frozen cz bump --increment PATCH || { log_info "Отменено."; exit 0; }
-        ;;
-    3)
-        read -p "Продолжить? $CURRENT → $MINOR (y/n): " confirm
-        [ "$confirm" = "y" ] && do_bump "MINOR" uv run --frozen cz bump --increment MINOR || { log_info "Отменено."; exit 0; }
-        ;;
-    4)
-        read -p "Продолжить? $CURRENT → $MAJOR (y/n): " confirm
-        [ "$confirm" = "y" ] && do_bump "MAJOR" uv run --frozen cz bump --increment MAJOR || { log_info "Отменено."; exit 0; }
-        ;;
-    5)
-        read -p "Введи версию (например 1.2.0): " manual_version
-        if [[ ! "$manual_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            log_error "Некорректный формат версии: $manual_version"
-            exit 1
-        fi
-        read -p "Продолжить? $CURRENT → $manual_version (y/n): " confirm
-        if [ "$confirm" = "y" ]; then
-            do_bump "manual $manual_version" uv run --frozen cz bump "$manual_version"
-        else
-            log_info "Отменено."
-            exit 0
-        fi
-        ;;
-    0)
-        log_info "Отменено пользователем."
-        exit 0
-        ;;
-    *)
-        log_error "Неверный выбор: $choice"
-        exit 1
-        ;;
+# ─── Выбор версии ────────────────────────────────────────────
+CURRENT=$(uv run --locked python scripts/release_version.py current)
+PATCH=$(uv run --locked python scripts/release_version.py next patch)
+MINOR=$(uv run --locked python scripts/release_version.py next minor)
+MAJOR=$(uv run --locked python scripts/release_version.py next major)
+echo "Текущая версия: $CURRENT"
+echo "1) Авто по коммитам (breaking → major, feat → minor, остальные → patch)"
+echo "2) PATCH: $PATCH"
+echo "3) MINOR: $MINOR"
+echo "4) MAJOR: $MAJOR"
+echo "5) Вручную"
+echo "0) Отмена"
+read -r -p "Выбор (0-5): " choice
+case "$choice" in
+    1) kind=auto ;;
+    2) kind=patch ;;
+    3) kind=minor ;;
+    4) kind=major ;;
+    5) read -r -p "Версия MAJOR.MINOR.PATCH: " kind ;;
+    0) exit 0 ;;
+    *) log_error "Некорректный выбор"; exit 1 ;;
 esac
-
-# ─── Проверка версий после bump ───────────────────────────────
-verify_versions() {
-    local expected=$1
-
-    VER_TOML=$(awk '
-        /^\[tool\.commitizen\]$/ { in_commitizen = 1; next }
-        /^\[/ { in_commitizen = 0 }
-        in_commitizen && /^version = / {
-            split($0, parts, "\"")
-            print parts[2]
-            exit
-        }
-    ' pyproject.toml)
-    VER_PY=$(grep '__version__' src/_version.py | head -1 | awk -F'"' '{print $2}')
-
-    log_info "Проверка версий после bump:"
-    log_info "  pyproject.toml  → $VER_TOML"
-    log_info "  src/_version.py → $VER_PY"
-
-    if [ "$VER_TOML" = "$expected" ] && [ "$VER_PY" = "$expected" ]; then
-        log_ok "Версии совпадают: $expected ✅"
-    else
-        log_error "Версии НЕ совпадают!"
-        log_error "  Ожидалось:      $expected"
-        log_error "  pyproject.toml: $VER_TOML"
-        log_error "  _version.py:    $VER_PY"
+NEW_VERSION=$(uv run --locked python scripts/release_version.py next "$kind" "$LAST_RELEASE_TAG")
+TAG="v$NEW_VERSION"
+for candidate in "$TAG" "$NEW_VERSION"; do
+    if git show-ref --verify --quiet "refs/tags/$candidate"; then
+        log_error "Тег $candidate уже существует. Выберите другую версию."
         exit 1
     fi
-}
+done
+read -r -p "Выпустить $CURRENT → $NEW_VERSION и запустить автодеплой? (y/n): " confirm
+[ "$confirm" = y ] || { log_info "Отменено"; exit 0; }
 
-NEW_VERSION=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
-if [ -z "$NEW_VERSION" ]; then
-    log_error "После bump на текущем коммите не найден релизный тег."
+uv run --locked python scripts/release_version.py write "$NEW_VERSION"
+uv lock
+uv sync --locked --group dev
+uv run --locked pre-commit run --all-files
+# Include the helper in checks: pre-commit's mypy hook checks only src/.
+uv run --locked ruff check scripts/release_version.py
+uv run --locked python -m unittest discover -s tests -v
+test "$(uv run --locked python scripts/release_version.py current)" = "$NEW_VERSION"
+git add -- pyproject.toml uv.lock
+git commit -m "bump: release $NEW_VERSION"
+test -z "$(git status --porcelain)" || { log_error "После коммита остались изменения"; exit 1; }
+git tag -a "$TAG" -m "Release $NEW_VERSION"
+# Send only this release tag together with the branch; never push unrelated tags.
+git push --atomic origin "$RELEASE_BRANCH" "refs/tags/$TAG"
+if ! gh release create "$TAG" --repo "$REPOSITORY" --verify-tag --title "$TAG" --generate-notes; then
+    log_error "Коммит и тег отправлены, но GitHub Release не опубликован."
+    log_error "Повторите только: gh release create $TAG --repo $REPOSITORY --verify-tag --title $TAG --generate-notes"
     exit 1
 fi
-verify_versions "$NEW_VERSION"
-
-# ─── Push ─────────────────────────────────────────────────────
-log_info "Пушим в remote"
-if ! git push origin "$RELEASE_BRANCH"; then
-    log_error "Не удалось отправить ветку $RELEASE_BRANCH"
-    exit 1
-fi
-if ! git push origin --tags; then
-    log_error "Не удалось отправить релизные теги"
-    exit 1
-fi
-
-echo ""
-log_ok "Релиз готов! Версия: $(git describe --tags)"
-log_info "Лог сохранён: $LOG_FILE"
+log_ok "GitHub Release $TAG опубликован. Автодеплой запущен; результат смотрите в Actions."
+log_info "Лог: $LOG_FILE"

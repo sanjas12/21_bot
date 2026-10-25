@@ -453,7 +453,7 @@ wheels = [
 
 [[package]]
 name = "sanja-bot"
-version = "0.0.1"
+version = "0.0.2"
 source = { virtual = "." }
 dependencies = [
     { name = "pytelegrambotapi", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
