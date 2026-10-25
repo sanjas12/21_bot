@@ -7,6 +7,7 @@ export GIT_TERMINAL_PROMPT=0
 
 tag=${1:?Release tag required}
 revision=${2:?Tested commit required}
+notes=${3:-}
 [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
 cd /root/21_bot
@@ -73,4 +74,13 @@ for attempt in {1..10}; do
     test "$(systemctl show -p MainPID --value 21-bot.service)" = "$pid"
     test "$(systemctl show -p NRestarts --value 21-bot.service)" = "$restarts"
 done
+# Notifications are queued only after the new process passed the health check.
+# A notification failure must not roll back a successfully deployed application.
+stopped=0
+if [ -n "$notes" ]; then
+    uv run --locked --no-dev python src/release_updates.py "$tag" "$notes" || {
+        echo 'Deployment succeeded, but release notification could not be queued.'
+        exit 1
+    }
+fi
 echo "Deployed $tag ($revision). Backup: $backup"

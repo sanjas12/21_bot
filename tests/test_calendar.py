@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from date_picker import picker  # noqa: E402
 from main import MENU, MyBot  # noqa: E402
 from notebook import Store, due_reminders, occurrences  # noqa: E402
+from release_updates import release_message  # noqa: E402
 
 
 def event(starts="2030-01-31T10:00:00", repeat="monthly", timezone="Europe/Moscow"):
@@ -111,6 +112,54 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0]["repeat"], "monthly")
         self.assertEqual(saved[0]["reminder"], 60)
+
+    def test_release_notification_persists_and_is_not_repeated(self):
+        self.store.ensure_user(1)
+        message = release_message("v0.0.4", "Добавлен просмотр на сегодня")
+        self.store.queue_release("v0.0.4", message)
+        self.app.deliver_release_updates()
+        self.api.send_message.assert_called_once_with(1, message)
+        self.store = Store(self.path)
+        self.app.store = self.store
+        self.store.ensure_user(2)
+        self.store.queue_release("v0.0.4", message)
+        self.app.deliver_release_updates()
+        self.assertEqual(self.api.send_message.call_count, 1)
+        self.store.queue_release("v0.0.5", "Следующий релиз")
+        self.assertEqual(len(self.store.pending_releases()), 2)
+
+    def test_failed_release_delivery_retries_independently(self):
+        for uid in (1, 2):
+            self.store.ensure_user(uid)
+        self.store.queue_release("v0.0.4", "Изменения")
+        self.api.send_message.side_effect = [RuntimeError("offline"), None]
+        self.app.deliver_release_updates()
+        pending = self.store.pending_releases()
+        self.assertEqual([row["user_id"] for row in pending], [1])
+        self.api.send_message.side_effect = None
+        self.app.deliver_release_updates()
+        self.assertEqual(self.store.pending_releases(), [])
+
+    def test_blocked_user_does_not_retry_release_forever(self):
+        self.store.ensure_user(1)
+        self.store.queue_release("v0.0.4", "Изменения")
+        error = RuntimeError("blocked")
+        error.error_code = 403
+        self.api.send_message.side_effect = error
+        self.app.deliver_release_updates()
+        self.assertEqual(self.store.pending_releases(), [])
+
+    def test_release_snapshot_without_users_does_not_notify_new_users(self):
+        self.store.queue_release("v0.0.4", "Изменения")
+        self.store.ensure_user(1)
+        self.store.queue_release("v0.0.4", "Изменения")
+        self.assertEqual(self.store.pending_releases(), [])
+
+    def test_release_message_is_plain_text_and_fits_telegram_limit(self):
+        message = release_message("v0.0.4", "😀" * 5000)
+        self.assertLess(len(message.encode("utf-16-le")) // 2, 4096)
+        self.assertIn("Полный список", message)
+        self.assertIn("Исправления", release_message("v0.0.4", ""))
 
     def test_edit_all_fields_and_confirm(self):
         eid = self.store.add(1, event(), 60)

@@ -46,6 +46,7 @@ jobs:
             test -n "${!name}" || { echo "Missing secret: $name"; exit 1; }
           done
           revision=$(git rev-parse HEAD)
+          notes=$(python -c 'import base64,json,os; event=json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8")); body=event["release"].get("body") or "Исправления и улучшения работы бота."; print(base64.b64encode(body[:1500].encode("utf-8")).decode("ascii"))')
           ssh_dir=$(mktemp -d)
           trap 'rm -rf -- "$ssh_dir"' EXIT
           chmod 700 "$ssh_dir"
@@ -55,4 +56,4 @@ jobs:
           ssh -T -i "$ssh_dir/key" -p "$DEPLOY_PORT" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 \
             -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-            "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- $RELEASE_TAG $revision" < scripts/deploy.sh
+            "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- $RELEASE_TAG $revision $notes" < scripts/deploy.sh

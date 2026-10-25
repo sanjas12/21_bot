@@ -96,7 +96,49 @@ class Store:
                     SELECT r.event_id,e.user_id,r.occurrence FROM reminders r
                     JOIN events e ON e.id=r.event_id;
                 DELETE FROM reminders;
+                CREATE TABLE IF NOT EXISTS release_notifications (
+                    version TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id),
+                    message TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(version,user_id));
             """)
+
+    def queue_release(self, version, message):
+        """Snapshot existing recipients; repeated deployments never resend."""
+        with self.connect() as db:
+            # A release is queued only once, including when new users join later.
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS announced_releases (version TEXT PRIMARY KEY)"
+            )
+            if not db.execute(
+                "INSERT OR IGNORE INTO announced_releases VALUES (?)", (version,)
+            ).rowcount:
+                return
+            db.execute(
+                "INSERT INTO release_notifications(version,user_id,message) "
+                "SELECT ?,id,? FROM users",
+                (version, message),
+            )
+
+    def pending_releases(self):
+        with self.connect() as db:
+            return db.execute(
+                "SELECT * FROM release_notifications WHERE sent=0 ORDER BY attempts,rowid LIMIT 20"
+            ).fetchall()
+
+    def mark_release_failed(self, version, uid):
+        with self.connect() as db:
+            db.execute(
+                "UPDATE release_notifications SET attempts=attempts+1 WHERE version=? AND user_id=?",
+                (version, uid),
+            )
+
+    def mark_release_sent(self, version, uid):
+        with self.connect() as db:
+            db.execute(
+                "UPDATE release_notifications SET sent=1 WHERE version=? AND user_id=?",
+                (version, uid),
+            )
 
     @contextmanager
     def connect(self):

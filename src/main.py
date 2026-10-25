@@ -542,10 +542,28 @@ class MyBot:
                         uid,
                     )
 
+    def deliver_release_updates(self):
+        for notice in self.store.pending_releases():
+            try:
+                self.bot.send_message(notice["user_id"], notice["message"])
+                self.store.mark_release_sent(notice["version"], notice["user_id"])
+            except Exception as error:
+                # Avoid logging Telegram exceptions: request URLs can contain tokens.
+                if getattr(error, "error_code", None) == 403:
+                    self.store.mark_release_sent(notice["version"], notice["user_id"])
+                else:
+                    self.store.mark_release_failed(notice["version"], notice["user_id"])
+                LOG.warning(
+                    "Cannot deliver release %s to user %s",
+                    notice["version"],
+                    notice["user_id"],
+                )
+
     def reminder_loop(self):
         while not self.stop.is_set():
             try:
                 self.remind_once()
+                self.deliver_release_updates()
             except Exception:
                 LOG.exception("Reminder scan failed")
             self.stop.wait(30)
