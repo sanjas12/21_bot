@@ -25,6 +25,10 @@ Bot sources are in `src/`; the entry point is `src/main.py`.
 ### Usage (Windows)
 1. Run `uv run --locked --no-dev python src/main.py` from the project root.
 
+Создание portable-приложения с `.exe`:
+`bash scripts/build.sh --prepare` (Git Bash на Windows).
+[Сборка и запуск Windows-приложения](docs/windows-build.md).
+
 ### Usage (Ubuntu)
 1. Run `bash start.sh`.
 

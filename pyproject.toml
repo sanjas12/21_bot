@@ -28,7 +28,7 @@ dev = [
 ]
 
 [tool.uv]
-# Run src/main.py directly; do not build/install the legacy setup.py project.
+# Run src/main.py directly; build.py creates the optional portable Windows bundle.
 package = false
 environments = [
     "sys_platform == 'win32'",

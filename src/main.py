@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,7 +16,11 @@ from telebot import types
 from date_picker import picker
 from notebook import REPEATS, Store, add_months, due_reminders, occurrences
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = (
+    Path(sys.executable).resolve().parent
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent.parent
+)
 LOG = logging.getLogger(__name__)
 MENU = [
     "➕ Добавить событие",
@@ -583,6 +588,27 @@ class MyBot:
 
 
 def main():
+    if sys.argv[1:] == ["--check"]:
+        import json
+        import tempfile
+
+        ZoneInfo("Europe/Moscow")
+        (ROOT / "docs" / "CHANGELOG.md").read_text(encoding="utf-8")
+        (ROOT / ".env.example").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            check_store = Store(Path(directory) / "calendar.sqlite3")
+            check_store.ensure_user(1)
+            if check_store.timezone(1) != "Europe/Moscow":
+                raise RuntimeError("SQLite check failed")
+        version = (
+            json.loads((ROOT / "build-info.json").read_text(encoding="utf-8"))[
+                "version"
+            ]
+            if getattr(sys, "frozen", False)
+            else "source"
+        )
+        print(f"21_bot {version}: offline check passed")
+        return
     load_dotenv(ROOT / ".env")
     token = os.getenv("BOT_TOKEN")
     if not token:
