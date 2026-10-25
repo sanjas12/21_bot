@@ -1,13 +1,13 @@
-#0.0.0.1
-from cx_Freeze import setup, Executable
+# 0.0.0.1
+from cx_Freeze import Executable, setup
 
 file = "setup.py"
 project_name = "my_bot"
 
-with open(file, 'r+', encoding='utf-8') as f:
-    version = f.readline().split('.')
+with open(file, "r+", encoding="utf-8") as f:
+    version = f.readline().split(".")
     version[-1] = str(int(version[-1]) + 1)
-    version = '.'.join(version)
+    version = ".".join(version)
     f.seek(0)
     f.write(version)
 
@@ -19,7 +19,7 @@ build_exe_options = {
     # "excludes": ["tkinter", "unittest"],
     # "packages": ["config"],
     # "includes": ["config"],
-    "optimize": 2,      # c 2 exe не запускается
+    "optimize": 2,  # c 2 exe не запускается
     # "zip_include_packages": ["PyQt5", "matplotlib"],
     # "include_files" : files
 }
@@ -32,7 +32,5 @@ setup(
     version="0.0.0.1",
     description="My Telegram Bot",
     options={"build_exe": build_exe_options},
-    
     executables=[Executable("src/main.py", target_name="mybot")],
-    
 )
