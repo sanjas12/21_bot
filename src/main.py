@@ -31,6 +31,7 @@ MENU = [
     "🌍 Часовой пояс",
     "✏️ Редактировать",
     "📋 Сегодня",
+    "📌 Завтра",
 ]
 REMINDERS = {
     "Без уведомления": -1,
@@ -393,8 +394,10 @@ class MyBot:
         zone = ZoneInfo(self.store.timezone(uid))
         now = datetime.now(UTC)
         local = now.astimezone(zone)
-        if period == 7:
+        if period in (7, 8):
             local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+            if period == 8:
+                local += timedelta(days=1)
             now = local.astimezone(UTC)
             end = (local + timedelta(days=1)).astimezone(UTC)
         else:

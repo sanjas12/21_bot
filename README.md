@@ -73,6 +73,8 @@ the others. New users see existing shared events on their next calendar view.
   Lists have navigation buttons. Dates use your selected time zone.
 - **Сегодня**: view all events for the current calendar day in your selected
   time zone, including events earlier today and recurring events.
+- **Завтра**: view all events for the next calendar day in your selected
+  time zone, including recurring events.
 - **Удалить**: use `/delete ID` from the list, then confirm. Deleting a
   recurring event deletes the entire series, not just one occurrence.
 - **Редактировать**: press the edit button below an event list or use `/edit ID`.

@@ -495,6 +495,56 @@ class CalendarTests(unittest.TestCase):
         self.assertEqual(self.app.pages[1][1], [])
         self.assertIn("Событий пока нет.", self.api.send_message.call_args.args[1])
 
+    def test_tomorrow_uses_local_day_across_new_year_and_visibility(self):
+        self.store.set_timezone(1, "Asia/Yekaterinburg")
+        for title, starts in (
+            ("Сегодня", "2030-12-31T18:59:59"),
+            ("Полночь", "2030-12-31T19:00:00"),
+            ("Вечер", "2031-01-01T18:59:59"),
+            ("Послезавтра", "2031-01-01T19:00:00"),
+        ):
+            self.store.add(1, {**event(starts, "once", "UTC"), "title": title}, -1)
+        for title, visibility in (("Общее", "public"), ("Чужое", "private")):
+            self.store.add(
+                2,
+                {
+                    **event("2030-12-30T20:00:00", "daily", "UTC"),
+                    "title": title,
+                    "visibility": visibility,
+                },
+                -1,
+            )
+        with patch("main.datetime") as clock:
+            clock.now.return_value = utc("2030-12-31T18:00:00")
+            self.app.handle(self.message("📌 Завтра"))
+        rows = self.app.pages[1][1]
+        self.assertEqual(len(rows), 3)
+        self.assertIn("01.01.2031 00:00 — Полночь", rows[0])
+        self.assertIn("Общее", rows[1])
+        self.assertIn("Вечер", rows[2])
+
+    def test_tomorrow_dst_day_ends_at_local_midnight(self):
+        self.store.set_timezone(1, "Europe/Berlin")
+        for starts in (
+            "2030-03-30T22:59:59",
+            "2030-03-30T23:00:00",
+            "2030-03-31T21:59:59",
+            "2030-03-31T22:00:00",
+        ):
+            self.store.add(1, event(starts, "once", "UTC"), -1)
+        with patch("main.datetime") as clock:
+            clock.now.return_value = utc("2030-03-30T12:00:00")
+            self.app.handle(self.message("📌 Завтра"))
+        rows = self.app.pages[1][1]
+        self.assertEqual(len(rows), 2)
+        self.assertIn("31.03.2030 00:00", rows[0])
+        self.assertIn("31.03.2030 23:59", rows[1])
+
+    def test_tomorrow_can_be_empty(self):
+        self.app.handle(self.message("📌 Завтра"))
+        self.assertEqual(self.app.pages[1][1], [])
+        self.assertIn("Событий пока нет.", self.api.send_message.call_args.args[1])
+
 
 if __name__ == "__main__":
     unittest.main()
