@@ -56,6 +56,9 @@ Open the bot in a private Telegram chat and send `/start`.
 New events default to **Общее**: all users known to the bot can see them and
 receive their reminders. The final creation step offers **Общее (по умолчанию)**
 or **Личное** before saving. Personal events are visible only to their author.
+Creating a shared event immediately notifies all other existing users, even
+when its reminder is disabled. The notification shows the time in each
+recipient's timezone. The author receives the usual save confirmation.
 Only the author can edit or delete an event, including a shared one. The
 **Доступ** field in editing changes visibility. Existing records remain personal
 when upgrading; they are never published automatically. Reminder delivery is

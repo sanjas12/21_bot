@@ -335,6 +335,68 @@ class CalendarTests(unittest.TestCase):
             [row["id"] for row in self.store.visible_events(2)], [public["id"]]
         )
 
+    def test_new_shared_event_notifies_other_users_in_their_timezone(self):
+        self.store.set_timezone(2, "Asia/Yekaterinburg")
+        self.store.ensure_user(3)
+        for text in (
+            MENU[0],
+            "Встреча",
+            "31.01.2030 10:00",
+            "Однократно",
+            "Без уведомления",
+        ):
+            self.app.handle(self.message(text))
+        self.api.send_message.reset_mock()
+        self.app.handle(self.message("Общее (по умолчанию)"))
+        calls = self.api.send_message.call_args_list
+        self.assertEqual([call.args[0] for call in calls], [2, 3, 1])
+        self.assertIn("Новое общее событие\nВстреча", calls[0].args[1])
+        self.assertIn("31.01.2030 12:00 (Asia/Yekaterinburg)", calls[0].args[1])
+        self.assertIn("31.01.2030 10:00 (Europe/Moscow)", calls[1].args[1])
+        self.assertIn("Сохранено #", calls[2].args[1])
+        self.assertEqual(self.store.events(1)[0]["reminder"], -1)
+
+    def test_new_private_event_does_not_notify_others(self):
+        self.store.ensure_user(2)
+        for text in (
+            MENU[0],
+            "Встреча",
+            "31.01.2030 10:00",
+            "Однократно",
+            "За час",
+        ):
+            self.app.handle(self.message(text))
+        self.api.send_message.reset_mock()
+        self.app.handle(self.message("Личное"))
+        self.api.send_message.assert_called_once()
+        self.assertEqual(self.api.send_message.call_args.args[0], 1)
+
+    def test_failed_creation_notice_does_not_block_others_or_saving(self):
+        self.store.ensure_user(2)
+        self.store.ensure_user(3)
+        for text in (
+            MENU[0],
+            "Встреча",
+            "31.01.2030 10:00",
+            "Однократно",
+            "За час",
+        ):
+            self.app.handle(self.message(text))
+        self.api.send_message.reset_mock()
+
+        def send(uid, *args, **kwargs):
+            if uid == 2:
+                raise OSError("Delivery failed")
+
+        self.api.send_message.side_effect = send
+        with self.assertLogs("main", level="WARNING"):
+            self.app.handle(self.message("Общее (по умолчанию)"))
+        self.assertEqual(
+            [call.args[0] for call in self.api.send_message.call_args_list], [2, 3, 1]
+        )
+        self.assertEqual(len(self.store.events(1)), 1)
+        self.assertNotIn(1, self.app.drafts)
+
     def test_shared_visibility_does_not_grant_edit_or_delete(self):
         eid = self.store.add(1, {**event(), "visibility": "public"}, 60)
         self.assertEqual(self.store.visible_events(2)[0]["id"], eid)

@@ -253,12 +253,36 @@ class MyBot:
                 return
             event_id = self.store.add(uid, draft, draft["reminder"])
             self.drafts.pop(uid)
+            self.notify_new_shared_event(uid, event_id)
             self.say(
                 uid,
                 f"Сохранено #{event_id}: {draft['title']}\n"
                 f"{start:%d.%m.%Y %H:%M} ({draft['timezone']})\n"
                 f"{REPEATS[draft['repeat']]}. {'Общее' if draft['visibility'] == 'public' else 'Личное'}.",
             )
+
+    def notify_new_shared_event(self, author_id, event_id):
+        event = self.store.get(author_id, event_id)
+        if event is None or event["visibility"] != "public":
+            return
+        start = datetime.fromisoformat(event["starts"]).replace(
+            tzinfo=ZoneInfo(event["timezone"])
+        )
+        for uid in self.store.recipients(event):
+            if uid == author_id:
+                continue
+            try:
+                zone = ZoneInfo(self.store.timezone(uid))
+                date = start.astimezone(zone)
+                self.bot.send_message(
+                    uid,
+                    f"🆕 Новое общее событие\n{event['title']}\n"
+                    f"{date:%d.%m.%Y %H:%M} ({zone.key}) · #{event_id}\n"
+                    f"{REPEATS[event['repeat']]}",
+                )
+            except Exception:
+                # Telegram exception details can contain the bot token.
+                LOG.warning("Cannot announce event %s to user %s", event_id, uid)
 
     def begin_edit(self, uid, event_id):
         event = self.store.get(uid, event_id)
