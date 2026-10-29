@@ -1,6 +1,6 @@
 [project]
 name = "sanja_bot"
-version = "0.0.6"
+version = "0.0.7"
 description = "Telegram bot for running on Ubuntu and developing on Windows"
 readme = "README.md"
 requires-python = ">=3.11"
