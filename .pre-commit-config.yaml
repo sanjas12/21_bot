@@ -52,9 +52,8 @@ repos:
         stages: [commit-msg]
         args: [feat, fix, docs, style, refactor, test, chore, ci, perf, bump, build]
 
-# --- Глобальные настройки ---
-default_language_version:
-  python: python3.11
+# Python-хуки используют интерпретатор, которым запущен pre-commit (из .venv).
+# Минимальная версия Python проекта задана в pyproject.toml.
 
 # Исключаем автогенерированные файлы и папку сборки
 exclude: |
