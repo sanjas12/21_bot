@@ -14,7 +14,14 @@ from dotenv import load_dotenv
 from telebot import types
 
 from date_picker import picker
-from notebook import REPEATS, Store, add_months, due_reminders, occurrences
+from notebook import (
+    REPEATS,
+    Store,
+    add_months,
+    due_reminders,
+    occurrences,
+    reminder_values,
+)
 
 ROOT = (
     Path(sys.executable).resolve().parent
@@ -159,7 +166,11 @@ class MyBot:
                 self.say(uid, "Как часто повторять?", [*REPEATS.values(), "Отмена"])
             elif text == "Напоминание":
                 draft["step"] = "reminder"
-                self.say(uid, "Когда напомнить?", [*REMINDERS, "Отмена"])
+                self.say(
+                    uid,
+                    "Когда напомнить?",
+                    [*REMINDERS, "Несколько напоминаний", "Отмена"],
+                )
             elif text == "Доступ":
                 draft["step"] = "visibility"
                 self.say(uid, "Кому доступно событие?", [*VISIBILITY, "Отмена"])
@@ -218,16 +229,36 @@ class MyBot:
             if "event_id" in draft:
                 self.edit_summary(uid)
                 return
-            self.say(uid, "Когда напомнить?", [*REMINDERS, "Отмена"])
+            self.say(
+                uid, "Когда напомнить?", [*REMINDERS, "Несколько напоминаний", "Отмена"]
+            )
         elif step == "reminder":
-            if text not in REMINDERS:
-                self.say(uid, "Выберите интервал кнопкой.", [*REMINDERS, "Отмена"])
+            if text == "Несколько напоминаний":
+                self.say(
+                    uid,
+                    "Введите интервалы через запятую, например: За неделю, За день, За час.",
+                    [*REMINDERS, "Отмена"],
+                )
                 return
+            labels = [item.strip() for item in text.split(",")]
+            if (
+                not labels
+                or any(label not in REMINDERS for label in labels)
+                or (len(labels) > 1 and "Без уведомления" in labels)
+            ):
+                self.say(
+                    uid,
+                    "Выберите интервал или введите несколько через запятую: За неделю, За день, За час.",
+                    [*REMINDERS, "Несколько напоминаний", "Отмена"],
+                )
+                return
+            values = sorted({REMINDERS[label] for label in labels}, reverse=True)
+            reminder = values[0] if len(values) == 1 else ",".join(map(str, values))
+            draft["reminder"] = reminder
             if "event_id" in draft:
-                draft["reminder"] = REMINDERS[text]
                 self.edit_summary(uid)
                 return
-            draft.update(reminder=REMINDERS[text], step="visibility")
+            draft["step"] = "visibility"
             self.say(
                 uid,
                 "Кому доступно событие? По умолчанию — общее.\n"
@@ -300,8 +331,10 @@ class MyBot:
         draft = self.drafts[uid]
         draft["step"] = "edit_fields"
         date = datetime.fromisoformat(draft["starts"])
-        reminder = next(
-            label for label, value in REMINDERS.items() if value == draft["reminder"]
+        reminder = ", ".join(
+            label
+            for label, value in REMINDERS.items()
+            if value in reminder_values(draft["reminder"])
         )
         self.say(
             uid,
@@ -559,7 +592,7 @@ class MyBot:
             if current is None:
                 continue
             for uid in self.store.recipients(current):
-                if self.store.sent(event["id"], start, uid):
+                if self.store.sent(event["id"], start, uid, event.get("delivery_lead")):
                     continue
                 try:
                     zone = ZoneInfo(self.store.timezone(uid))
@@ -570,7 +603,9 @@ class MyBot:
                         f"🔔 {scope} напоминание\n{event['title']}\n"
                         f"{date:%d.%m.%Y %H:%M} ({zone.key}) · #{event['id']}",
                     )
-                    self.store.mark_sent(event["id"], start, uid)
+                    self.store.mark_sent(
+                        event["id"], start, uid, event.get("delivery_lead")
+                    )
                 except Exception:
                     LOG.exception(
                         "Cannot deliver reminder for event %s to user %s",

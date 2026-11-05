@@ -254,7 +254,7 @@ class Store:
                 )
             return True
 
-    def sent(self, event_id, start, uid=None):
+    def sent(self, event_id, start, uid=None, lead=None):
         with self.connect() as db:
             if uid is None:
                 owner = db.execute(
@@ -264,12 +264,12 @@ class Store:
             return (
                 db.execute(
                     "SELECT 1 FROM deliveries WHERE event_id=? AND occurrence=? AND user_id=?",
-                    (event_id, start.isoformat(), uid),
+                    (event_id, delivery_key(start, lead), uid),
                 ).fetchone()
                 is not None
             )
 
-    def mark_sent(self, event_id, start, uid=None):
+    def mark_sent(self, event_id, start, uid=None, lead=None):
         with self.connect() as db:
             if uid is None:
                 owner = db.execute(
@@ -281,22 +281,36 @@ class Store:
             db.execute(
                 "INSERT OR IGNORE INTO deliveries(event_id,user_id,occurrence) "
                 "SELECT id, ?, ? FROM events WHERE id=?",
-                (uid, start.isoformat(), event_id),
+                (uid, delivery_key(start, lead), event_id),
             )
 
 
+def reminder_values(value):
+    return [int(item) for item in str(value).split(",")]
+
+
+def delivery_key(start, lead):
+    return start.isoformat() + (f"/{lead}" if lead is not None else "")
+
+
 def due_reminders(store, now):
-    """Catch up within 24h of due time and at most 1h after the event."""
-    for event in store.events():
-        lead = timedelta(minutes=event["reminder"])
-        for start in occurrences(
-            event, now - timedelta(hours=1), now + lead + timedelta(seconds=1)
-        ):
-            due = start - lead
-            if event["created_at"]:
-                due = max(due, datetime.fromisoformat(event["created_at"]))
-            if now - timedelta(hours=24) <= due <= now and any(
-                not store.sent(event["id"], start, uid)
-                for uid in store.recipients(event)
+    """Catch up independently for every configured interval and recipient."""
+    for saved in store.events():
+        values = reminder_values(saved["reminder"])
+        for minutes in values:
+            if minutes < 0:
+                continue
+            event = dict(saved)
+            event["delivery_lead"] = minutes if len(values) > 1 else None
+            lead = timedelta(minutes=minutes)
+            for start in occurrences(
+                event, now - timedelta(hours=1), now + lead + timedelta(seconds=1)
             ):
-                yield event, start
+                due = start - lead
+                if event["created_at"]:
+                    due = max(due, datetime.fromisoformat(event["created_at"]))
+                if now - timedelta(hours=24) <= due <= now and any(
+                    not store.sent(event["id"], start, uid, event["delivery_lead"])
+                    for uid in store.recipients(event)
+                ):
+                    yield event, start

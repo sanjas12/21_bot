@@ -98,6 +98,30 @@ class CalendarTests(unittest.TestCase):
             chat=SimpleNamespace(id=uid, type="private"),
         )
 
+    def test_multiple_reminders_deliver_independently_and_survive_restart(self):
+        start = (datetime.now(UTC) + timedelta(days=8)).replace(microsecond=0)
+        draft = event(start.replace(tzinfo=None).isoformat(), "once", "UTC")
+        self.store.add(1, draft, "10080,1440,60")
+        for minutes, expected in ((10080, 1), (1440, 2), (60, 3)):
+            self.app.remind_once(start - timedelta(minutes=minutes))
+            self.assertEqual(self.api.send_message.call_count, expected)
+            self.app.store = Store(self.path)
+            self.app.remind_once(start - timedelta(minutes=minutes))
+            self.assertEqual(self.api.send_message.call_count, expected)
+
+    def test_multiple_reminders_input(self):
+        for text in (
+            MENU[0],
+            "Несколько сроков",
+            "31.01.2030 10:00",
+            "Однократно",
+            "Несколько напоминаний",
+            "За неделю, За день, За час",
+            "Личное",
+        ):
+            self.app.handle(self.message(text))
+        self.assertEqual(self.store.events(1)[0]["reminder"], "10080,1440,60")
+
     def test_creation_and_persistence(self):
         for text in [
             MENU[0],
