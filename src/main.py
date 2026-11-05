@@ -236,11 +236,20 @@ class MyBot:
             if text == "Несколько напоминаний":
                 self.say(
                     uid,
-                    "Введите интервалы через запятую, например: За неделю, За день, За час.",
-                    [*REMINDERS, "Отмена"],
+                    "Выберите готовый набор или введите интервалы через запятую.",
+                    [
+                        "За неделю, за день и за час",
+                        "За день и за час",
+                        *REMINDERS,
+                        "Отмена",
+                    ],
                 )
                 return
-            labels = [item.strip() for item in text.split(",")]
+            presets = {
+                "За неделю, за день и за час": "За неделю, За день, За час",
+                "За день и за час": "За день, За час",
+            }
+            labels = [item.strip() for item in presets.get(text, text).split(",")]
             if (
                 not labels
                 or any(label not in REMINDERS for label in labels)

@@ -122,6 +122,31 @@ class CalendarTests(unittest.TestCase):
             self.app.handle(self.message(text))
         self.assertEqual(self.store.events(1)[0]["reminder"], "10080,1440,60")
 
+    def test_multiple_reminder_presets_for_creation_and_editing(self):
+        for label, expected in (
+            ("За неделю, за день и за час", "10080,1440,60"),
+            ("За день и за час", "1440,60"),
+        ):
+            with self.subTest(label=label):
+                for text in (
+                    MENU[0],
+                    "Набор",
+                    "31.01.2030 10:00",
+                    "Однократно",
+                    "Несколько напоминаний",
+                    label,
+                    "Личное",
+                ):
+                    self.app.handle(self.message(text))
+                saved = self.store.events(1)[-1]
+                self.assertEqual(saved["reminder"], expected)
+                self.app.begin_edit(1, saved["id"])
+                self.app.handle(self.message("Напоминание"))
+                self.app.handle(self.message("Несколько напоминаний"))
+                self.app.handle(self.message(label))
+                self.app.handle(self.message("Сохранить изменения"))
+                self.assertEqual(self.store.get(1, saved["id"])["reminder"], expected)
+
     def test_creation_and_persistence(self):
         for text in [
             MENU[0],
